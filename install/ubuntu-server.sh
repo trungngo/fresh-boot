@@ -26,4 +26,9 @@ if ! grep -qs '^MY_MACHINE=' "$conf/local.env" 2>/dev/null; then
   printf 'MY_MACHINE=%s\n' "$name" >> "$conf/local.env"
 fi
 
+# Piped from curl, stdin is the pipe, not a terminal; dot asks its questions (your name, e-mail,
+# this machine's name) on the terminal, so hand it /dev/tty when there is one.
+if [ ! -t 0 ] && (: </dev/tty) 2>/dev/null; then
+  exec dot apply --profile ubuntu-server "$@" </dev/tty
+fi
 exec dot apply --profile ubuntu-server "$@"

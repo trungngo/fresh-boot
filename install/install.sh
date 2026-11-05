@@ -47,4 +47,9 @@ command -v curl >/dev/null 2>&1 || { echo "fresh-boot: curl is required (sudo ap
 tmp=$(mktemp)
 trap 'rm -f "$tmp"' EXIT
 curl -fsSL "$raw/$script" -o "$tmp"
-bash "$tmp" "$@"
+# stdin is the curl pipe here: give the script the terminal, so it can ask its questions.
+if [ ! -t 0 ] && (: </dev/tty) 2>/dev/null; then
+  bash "$tmp" "$@" </dev/tty
+else
+  bash "$tmp" "$@"
+fi

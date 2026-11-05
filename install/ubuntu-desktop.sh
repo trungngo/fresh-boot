@@ -16,4 +16,9 @@ if ! command -v dot >/dev/null 2>&1 && [ ! -x "$HOME/.local/bin/dot" ]; then
 fi
 PATH="$HOME/.local/bin:$PATH"
 
+# Piped from curl, stdin is the pipe, not a terminal; dot asks its questions (your name, e-mail,
+# this machine's name) on the terminal, so hand it /dev/tty when there is one.
+if [ ! -t 0 ] && (: </dev/tty) 2>/dev/null; then
+  exec dot apply --profile ubuntu-desktop "$@" </dev/tty
+fi
 exec dot apply --profile ubuntu-desktop "$@"
