@@ -476,17 +476,29 @@ class Version(TnTestCase):
         r = self.tn_proc("nothing-here")
         self.assertExit(r, 2)
 
-    def test_version_gate(self):
+    def _run_as_old_python(self, env, *argv):
         # Run bin/tn under a fake old interpreter version by patching sys.version_info.
         from tn.testing import BIN_TN
         code = ("import sys\nsys.version_info = (3, 9, 0, 'final', 0)\n"
-                "sys.argv = [%r]\nexec(compile(open(%r).read(), %r, 'exec'))\n"
-                % (str(BIN_TN), str(BIN_TN), str(BIN_TN)))
+                "sys.argv = %r\nexec(compile(open(%r).read(), %r, 'exec'))\n"
+                % ([str(BIN_TN), *argv], str(BIN_TN), str(BIN_TN)))
         import subprocess
-        p = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+        return subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, env=env)
+
+    def test_version_gate(self):
+        # No newer interpreter to hand over to (TN_REEXEC is set): the gate explains and exits 3.
+        p = self._run_as_old_python(dict(os.environ, TN_REEXEC="1"))
         self.assertEqual(p.returncode, 3)
         self.assertIn("tn: needs Python 3.11 or later (this is 3.9)", p.stderr)
         self.assertIn("run: dot apply common", p.stderr)
+
+    def test_old_python_hands_over_to_a_newer_one(self):
+        # An old `python3` first on PATH: tn finds this (3.11+) interpreter and re-runs with it.
+        env = dict(os.environ, PATH=os.path.dirname(sys.executable) + os.pathsep + os.environ.get("PATH", ""))
+        env.pop("TN_REEXEC", None)
+        p = self._run_as_old_python(env, "--version")
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertIn("tn ", p.stdout)
 
     def test_python_dash_m(self):
         import subprocess
