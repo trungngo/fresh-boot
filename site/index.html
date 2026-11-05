@@ -226,7 +226,6 @@
     <nav>
       <a href="#why">Why</a>
       <a href="#installs">What installs</a>
-      <a href="#install">Install</a>
       <a href="#use">Use</a>
       <a class="gh" href="https://github.com/trungngo/fresh-boot">GitHub</a>
     </nav>
@@ -246,8 +245,7 @@
     </p>
 
     <div class="btns">
-      <a class="btn primary" href="#install">Install</a>
-      <a class="btn" href="https://github.com/trungngo/fresh-boot">View on GitHub</a>
+      <a class="btn primary" href="https://github.com/trungngo/fresh-boot">View on GitHub</a>
     </div>
 
     <div class="tabs" role="tablist" aria-label="Platform">
@@ -264,7 +262,7 @@
       <code id="one-liner-ps">irm https://raw.githubusercontent.com/trungngo/fresh-boot/main/install/windows.ps1 | iex</code>
       <button class="copy" type="button" data-copy="#one-liner-ps">Copy</button>
     </div>
-    <p class="note">macOS and Ubuntu / Debian, or Windows PowerShell. No GitHub login, token or account needed.</p>
+    <p class="note">macOS and Ubuntu / Debian, or Windows PowerShell (the least tested). No GitHub login, token or account needed. <a href="https://github.com/trungngo/fresh-boot/tree/main/install">Read the scripts first</a>.</p>
   </div>
 </section>
 
@@ -338,40 +336,7 @@
   </div>
 </section>
 
-<section id="install" class="band">
-  <div class="wrap">
-    <div class="eyebrow">Install</div>
-    <h2>Run it on the new machine.</h2>
-    <p class="lead">The script is short and safe to rerun. <code>dot apply</code> shows its plan and asks before it
-      changes anything, and asks once for your name, e-mail and this machine's short name.</p>
-
-    <div class="tabs" role="tablist" aria-label="Platform">
-      <button role="tab" data-os="sh" aria-selected="true" aria-controls="tab-sh" id="btn-sh">macOS / Linux</button>
-      <button role="tab" data-os="ps" aria-selected="false" aria-controls="tab-ps" id="btn-ps">Windows</button>
-    </div>
-
-    <div class="tab-panel" data-os-panel="sh" id="tab-sh" role="tabpanel" aria-labelledby="btn-sh">
-<pre># Install and apply the default set
-curl -fsSL https://raw.githubusercontent.com/trungngo/fresh-boot/main/install/install.sh | sh
-
-# Pass arguments on to dot apply
-curl -fsSL https://raw.githubusercontent.com/trungngo/fresh-boot/main/install/install.sh | sh -s -- --upgrade
-
-# Linux: force the desktop or server set
-curl -fsSL https://raw.githubusercontent.com/trungngo/fresh-boot/main/install/install.sh | FRESH_BOOT_ROLE=server sh</pre>
-    </div>
-
-    <div class="tab-panel" data-os-panel="ps" id="tab-ps" role="tabpanel" aria-labelledby="btn-ps" hidden>
-<pre># Windows PowerShell 5.1 or PowerShell 7
-irm https://raw.githubusercontent.com/trungngo/fresh-boot/main/install/windows.ps1 | iex</pre>
-    </div>
-
-    <p class="note">Prefer to read first? The scripts are in
-      <a href="https://github.com/trungngo/fresh-boot/tree/main/install">install/</a>. Windows is the least tested platform.</p>
-  </div>
-</section>
-
-<section id="use">
+<section id="use" class="band">
   <div class="wrap split">
     <div>
       <div class="eyebrow">Use</div>
@@ -399,7 +364,7 @@ irm https://raw.githubusercontent.com/trungngo/fresh-boot/main/install/windows.p
   </div>
 </section>
 
-<section class="band">
+<section>
   <div class="wrap">
     <div class="eyebrow">Make it yours</div>
     <h2>Fork, edit, install.</h2>
