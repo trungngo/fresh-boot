@@ -12,8 +12,18 @@
 #
 # No oh-my-zsh: sections 2-4 do what its lib/ and the git, tmux, docker and kubectl plugins did.
 #
-# Order: 1. dot env  2. options, history  3. keys  4. completion  5. aliases, functions
+# Order: 0. TERM  1. dot env  2. options, history  3. keys  4. completion  5. aliases, functions
 #        6. prompt  7. conf.d/*.zsh  8. plugins  9. ~/.local.zshrc
+
+# --- 0. A TERM this machine has no terminfo entry for ----------------------------------------
+#
+# Over ssh from Ghostty (TERM=xterm-ghostty) or kitty, a machine that lacks the entry cannot
+# drive the terminal: typed characters show twice and autosuggestions garble the line. Fall back to
+# a type every machine has. (Copy the entry over instead, to keep the terminal's own features:
+# `infocmp -x $TERM | ssh <host> 'mkdir -p ~/.terminfo && tic -x -'`.)
+if [[ -n $TERM && $TERM != dumb ]] && (( $+commands[infocmp] )) && ! infocmp "$TERM" >/dev/null 2>&1; then
+  export TERM=xterm-256color
+fi
 
 # --- 1. PATH and environment from dot -------------------------------------------------------
 #
