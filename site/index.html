@@ -1,0 +1,452 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>fresh-boot — one command for a new machine</title>
+<meta name="description" content="fresh-boot sets up a new Mac, Ubuntu or Windows machine with one command: a small default set, everything else opt-in. Built on dot. No secrets in the repository.">
+<style>
+  :root {
+    --bg: #fbfaf7;
+    --surface: #ffffff;
+    --ink: #17181c;
+    --muted: #5d6170;
+    --line: #e4e2dc;
+    --accent: #2f6fdb;
+    --accent-ink: #ffffff;
+    --ok: #1f8a5b;
+    --warn: #b7791f;
+    --code-bg: #f1f0ec;
+    --code-ink: #1c1d22;
+    --radius: 14px;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0f1115;
+      --surface: #171a21;
+      --ink: #eceef3;
+      --muted: #9aa1b2;
+      --line: #2a2e3a;
+      --accent: #7aa7ff;
+      --accent-ink: #0b1220;
+      --ok: #5fd39c;
+      --warn: #f0b75e;
+      --code-bg: #1d212b;
+      --code-ink: #e6e8ee;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0f1115;
+    --surface: #171a21;
+    --ink: #eceef3;
+    --muted: #9aa1b2;
+    --line: #2a2e3a;
+    --accent: #7aa7ff;
+    --accent-ink: #0b1220;
+    --ok: #5fd39c;
+    --warn: #f0b75e;
+    --code-bg: #1d212b;
+    --code-ink: #e6e8ee;
+  }
+
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font: 16px/1.6 var(--sans);
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 16px; }
+  section { padding: 72px 0; }
+  h1, h2, h3 { line-height: 1.15; margin: 0 0 12px; letter-spacing: -0.01em; }
+  h1 { font-size: clamp(2.2rem, 5.5vw, 3.6rem); }
+  h2 { font-size: clamp(1.6rem, 3.5vw, 2.2rem); }
+  h3 { font-size: 1.1rem; }
+  p { margin: 0 0 14px; }
+  .lead { font-size: clamp(1.05rem, 2.2vw, 1.25rem); color: var(--muted); max-width: 46rem; }
+  .eyebrow {
+    font: 600 13px/1 var(--sans); text-transform: uppercase; letter-spacing: .12em;
+    color: var(--accent); margin-bottom: 14px;
+  }
+  code, pre, .mono { font-family: var(--mono); font-size: 14px; }
+  code { background: var(--code-bg); color: var(--code-ink); padding: 2px 6px; border-radius: 6px; }
+
+  /* top bar */
+  .top {
+    position: sticky; top: 0; z-index: 10;
+    background: color-mix(in srgb, var(--bg) 88%, transparent);
+    backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line);
+  }
+  .top .wrap { display: flex; align-items: center; gap: 20px; height: 56px; }
+  .brand { font: 700 18px var(--mono); color: var(--ink); }
+  .brand span { color: var(--accent); }
+  .top nav { margin-left: auto; display: flex; gap: 18px; font-size: 15px; }
+  .top nav a { color: var(--muted); }
+  .top nav a:hover { color: var(--ink); }
+  @media (max-width: 640px) { .top nav a:not(.gh) { display: none; } }
+
+  /* buttons */
+  .btns { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 28px; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 12px 18px; border-radius: 10px; font-weight: 600; font-size: 15px;
+    border: 1px solid var(--line); background: var(--surface); color: var(--ink);
+    cursor: pointer; font-family: inherit;
+  }
+  .btn:hover { text-decoration: none; border-color: var(--accent); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  .btn.primary:hover { filter: brightness(1.06); }
+
+  /* hero */
+  .hero { padding: 88px 0 56px; }
+  .pill {
+    display: inline-flex; gap: 8px; align-items: center; font-size: 14px; color: var(--muted);
+    border: 1px solid var(--line); background: var(--surface); padding: 6px 12px; border-radius: 999px;
+    margin-bottom: 22px;
+  }
+  .pill b { color: var(--ok); font-weight: 600; }
+  .install-line {
+    margin-top: 36px; background: var(--surface); border: 1px solid var(--line);
+    border-radius: var(--radius); padding: 14px 16px; display: flex; gap: 12px; align-items: center;
+    max-width: 980px; overflow: hidden;
+  }
+  .install-line .prompt { color: var(--muted); user-select: none; }
+  .install-line code {
+    background: none; padding: 0; flex: 1; overflow-x: auto; white-space: nowrap;
+    -webkit-overflow-scrolling: touch;
+  }
+  .copy {
+    flex: none; font: 600 13px var(--sans); color: var(--muted); background: var(--code-bg);
+    border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; cursor: pointer;
+  }
+  .copy:hover { color: var(--ink); }
+  .copy.done { color: var(--ok); }
+  .note { font-size: 14px; color: var(--muted); margin-top: 12px; }
+
+  /* terminal */
+  .term {
+    background: var(--code-bg); border: 1px solid var(--line); border-radius: var(--radius);
+    overflow: hidden; margin-top: 8px;
+  }
+  .term-bar {
+    display: flex; gap: 7px; padding: 12px 14px; border-bottom: 1px solid var(--line);
+    background: var(--surface);
+  }
+  .term-bar i { width: 11px; height: 11px; border-radius: 50%; background: var(--line); display: block; }
+  .term pre {
+    margin: 0; padding: 18px 20px; overflow-x: auto; color: var(--code-ink); line-height: 1.55;
+  }
+  .c-dim { color: var(--muted); }
+  .c-ok { color: var(--ok); }
+  .c-warn { color: var(--warn); }
+  .c-accent { color: var(--accent); }
+
+  /* grid of features */
+  .grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr)); margin-top: 36px; }
+  .term { max-width: 100%; }
+  .card {
+    background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 22px;
+  }
+  .card p { color: var(--muted); font-size: 15px; margin: 0; }
+  .card .ico {
+    width: 36px; height: 36px; border-radius: 10px; display: grid; place-items: center;
+    background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent);
+    font: 700 16px var(--mono); margin-bottom: 14px;
+  }
+
+  /* split */
+  .split { display: grid; gap: 40px; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: center; }
+  .split > * { min-width: 0; }
+  @media (max-width: 860px) { .split { grid-template-columns: minmax(0, 1fr); } }
+  .checklist { list-style: none; padding: 0; margin: 20px 0 0; }
+  .checklist li { padding: 8px 0 8px 30px; position: relative; color: var(--muted); }
+  .checklist li::before {
+    content: "✓"; position: absolute; left: 0; top: 8px; color: var(--ok); font-weight: 700;
+  }
+  .checklist li strong { color: var(--ink); font-weight: 600; }
+
+  /* platforms and downloads */
+  .band { background: var(--surface); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+  table { width: 100%; border-collapse: collapse; margin-top: 24px; font-size: 15px; }
+  th, td { text-align: left; padding: 14px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); font-weight: 600; }
+  td a { font-weight: 600; }
+  .tag {
+    display: inline-block; font-size: 12px; font-weight: 600; padding: 3px 8px; border-radius: 6px;
+    background: color-mix(in srgb, var(--ok) 16%, transparent); color: var(--ok);
+  }
+  .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+  /* tabs */
+  .tabs { display: inline-flex; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; margin-top: 24px; }
+  .tabs button {
+    font: 600 14px var(--sans); padding: 9px 16px; background: var(--surface); color: var(--muted);
+    border: 0; cursor: pointer;
+  }
+  .tabs button[aria-selected="true"] { background: var(--accent); color: var(--accent-ink); }
+  .tab-panel { margin-top: 14px; }
+  .tab-panel[hidden] { display: none; }
+  .tab-panel pre {
+    background: var(--code-bg); border: 1px solid var(--line); border-radius: var(--radius);
+    padding: 18px 20px; overflow-x: auto; margin: 0; color: var(--code-ink); line-height: 1.6;
+  }
+
+  /* checksums */
+  details { margin-top: 20px; }
+  summary { cursor: pointer; color: var(--accent); font-weight: 600; }
+  details pre {
+    background: var(--code-bg); border: 1px solid var(--line); border-radius: 10px;
+    padding: 14px 16px; overflow-x: auto; font-size: 13px; color: var(--code-ink);
+  }
+
+  footer { padding: 40px 0 56px; border-top: 1px solid var(--line); color: var(--muted); font-size: 14px; }
+  footer .wrap { display: flex; flex-wrap: wrap; gap: 18px 28px; align-items: center; justify-content: space-between; }
+  footer nav { display: flex; gap: 18px; flex-wrap: wrap; }
+  footer a { color: var(--muted); }
+
+  @media (max-width: 640px) {
+    section { padding: 52px 0; }
+    .hero { padding: 56px 0 40px; }
+    .btns .btn { flex: 1 1 100%; justify-content: center; }
+  }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="wrap">
+    <a class="brand" href="#top">fresh<span>-</span>boot</a>
+    <nav>
+      <a href="#why">Why</a>
+      <a href="#installs">What installs</a>
+      <a href="#install">Install</a>
+      <a href="#use">Use</a>
+      <a class="gh" href="https://github.com/trungngo/fresh-boot">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main id="top">
+
+<section class="hero">
+  <div class="wrap">
+    <div class="pill"><b>MIT</b> · macOS · Ubuntu · Windows · built on <a href="https://trungngo.github.io/dot-cli/">dot</a></div>
+    <h1>A new machine, one command.</h1>
+    <p class="lead">
+      fresh-boot installs a small, sensible default set on a new Mac, Ubuntu desktop or server, or
+      Windows PC, and lets you add anything else with one more command. It shows its plan before it
+      changes anything, and it is safe to run again.
+    </p>
+
+    <div class="btns">
+      <a class="btn primary" href="#install">Install</a>
+      <a class="btn" href="https://github.com/trungngo/fresh-boot">View on GitHub</a>
+    </div>
+
+    <div class="install-line" role="group" aria-label="Install command">
+      <span class="prompt mono">$</span>
+      <code id="one-liner">curl -fsSL https://raw.githubusercontent.com/trungngo/fresh-boot/main/install/install.sh | sh</code>
+      <button class="copy" type="button" data-copy="#one-liner">Copy</button>
+    </div>
+    <p class="note">macOS and Ubuntu / Debian. Windows: <a href="#install">PowerShell command below</a>. No GitHub login, token or account needed.</p>
+  </div>
+</section>
+
+<section id="why" class="band">
+  <div class="wrap">
+    <div class="eyebrow">Why fresh-boot</div>
+    <h2>Small by default. Yours to change.</h2>
+    <p class="lead">A fresh install should not surprise you with forty apps you never asked for.</p>
+
+    <div class="grid">
+      <div class="card">
+        <div class="ico">1</div>
+        <h3>One command</h3>
+        <p>The installer detects your platform, installs <code>git</code>, fetches this repository and <a href="https://github.com/trungngo/dot-cli">dot</a>, checks dot's download against its checksum, and applies the default set.</p>
+      </div>
+      <div class="card">
+        <div class="ico">min</div>
+        <h3>A small default</h3>
+        <p>git, gh, glab, tailscale, zsh, tmux, vim and ghostty, wherever they exist for your platform. Languages, editors, apps and games are opt-in.</p>
+      </div>
+      <div class="card">
+        <div class="ico">dry</div>
+        <h3>Plan, then apply</h3>
+        <p><code>dot plan</code> shows every change first. <code>dot status</code> shows drift. Re-running <code>dot apply</code> changes nothing that is already right.</p>
+      </div>
+      <div class="card">
+        <div class="ico">new</div>
+        <h3>Always current</h3>
+        <p>Nothing pins a version. Each installer resolves the current stable release when it runs, and <code>dot apply --upgrade</code> upgrades what is outdated.</p>
+      </div>
+      <div class="card">
+        <div class="ico">key</div>
+        <h3>No secrets inside</h3>
+        <p>The repository holds no tokens, keys or personal data. Your name and e-mail are asked once and kept on your machine only; logins happen interactively.</p>
+      </div>
+      <div class="card">
+        <div class="ico">fork</div>
+        <h3>Opinionated, so fork it</h3>
+        <p>The shell, tmux, vim and terminal configs are one person's taste. Fork the repository and edit <code>dot.yml</code> and the bundles until the result is yours.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="installs">
+  <div class="wrap split">
+    <div>
+      <div class="eyebrow">What installs</div>
+      <h2>The default, then whatever you add.</h2>
+      <p class="lead">Every tool is a <em>bundle</em>: a directory with a manifest and a README that says what it installs and why.</p>
+      <ul class="checklist">
+        <li><strong>Default:</strong> <code>git</code> <code>gh</code> <code>glab</code> <code>tailscale</code> <code>zsh</code> <code>tmux</code> <code>vim</code> <code>ghostty</code>, plus the baseline every bundle assumes.</li>
+        <li><strong>Languages:</strong> <code>nodejs</code> <code>python</code> <code>rust</code> <code>go</code> <code>java</code> <code>dotnet</code> <code>maven</code>.</li>
+        <li><strong>Dev tools:</strong> <code>vscode</code> <code>docker</code> <code>zed</code> <code>jetbrains-toolbox</code> <code>claude</code> <code>codex</code>.</li>
+        <li><strong>Apps:</strong> <code>chrome</code> <code>slack</code> <code>localsend</code> <code>libreoffice</code> and more.</li>
+        <li><strong>Platforms:</strong> macOS, Ubuntu desktop, Ubuntu server and Windows (the least tested).</li>
+      </ul>
+    </div>
+    <div class="term">
+      <div class="term-bar"><i></i><i></i><i></i></div>
+<pre><span class="c-dim">$</span> dot apply nodejs python rust
+<span class="c-dim">$</span> dot apply vscode docker
+<span class="c-dim">$</span> dot apply claude codex
+
+<span class="c-dim"># which bundles exist, and in what order</span>
+<span class="c-dim">$</span> dot graph
+
+<span class="c-dim"># why a bundle is (not) part of this machine</span>
+<span class="c-dim">$</span> dot why docker</pre>
+    </div>
+  </div>
+</section>
+
+<section id="install" class="band">
+  <div class="wrap">
+    <div class="eyebrow">Install</div>
+    <h2>Run it on the new machine.</h2>
+    <p class="lead">The script is short and safe to rerun. <code>dot apply</code> shows its plan and asks before it
+      changes anything, and asks once for your name, e-mail and this machine's short name.</p>
+
+    <div class="tabs" role="tablist" aria-label="Platform">
+      <button role="tab" aria-selected="true" aria-controls="tab-sh" id="btn-sh">macOS / Linux</button>
+      <button role="tab" aria-selected="false" aria-controls="tab-ps" id="btn-ps">Windows</button>
+    </div>
+
+    <div class="tab-panel" id="tab-sh" role="tabpanel" aria-labelledby="btn-sh">
+<pre># Install and apply the default set
+curl -fsSL https://raw.githubusercontent.com/trungngo/fresh-boot/main/install/install.sh | sh
+
+# Pass arguments on to dot apply
+curl -fsSL https://raw.githubusercontent.com/trungngo/fresh-boot/main/install/install.sh | sh -s -- --upgrade
+
+# Linux: force the desktop or server set
+curl -fsSL https://raw.githubusercontent.com/trungngo/fresh-boot/main/install/install.sh | FRESH_BOOT_ROLE=server sh</pre>
+    </div>
+
+    <div class="tab-panel" id="tab-ps" role="tabpanel" aria-labelledby="btn-ps" hidden>
+<pre># Windows PowerShell 5.1 or PowerShell 7
+irm https://raw.githubusercontent.com/trungngo/fresh-boot/main/install/windows.ps1 | iex</pre>
+    </div>
+
+    <p class="note">Prefer to read first? The scripts are in
+      <a href="https://github.com/trungngo/fresh-boot/tree/main/install">install/</a>. Windows is the least tested platform.</p>
+  </div>
+</section>
+
+<section id="use">
+  <div class="wrap split">
+    <div>
+      <div class="eyebrow">Use</div>
+      <h2>Day to day.</h2>
+      <p class="lead">fresh-boot is a repository of bundles, and <code>dot</code> is the tool that applies it.
+        The checkout lives in <code>~/.dot</code>.</p>
+      <ul class="checklist">
+        <li><strong>Add software:</strong> <code>dot apply &lt;bundle&gt;</code> installs it with what it requires.</li>
+        <li><strong>Keep current:</strong> <code>dot apply --upgrade</code>, and <code>dot self-update</code> for dot itself.</li>
+        <li><strong>Check:</strong> <code>dot plan</code> changes nothing; <code>dot status</code> shows drift.</li>
+        <li><strong>Change the setup:</strong> edit the checkout, commit and push; on another machine <code>git pull</code>, then <code>dot apply</code>.</li>
+        <li><strong>Optional helper:</strong> <code>tn</code>, a small command for projects, git and tmux sessions.</li>
+      </ul>
+    </div>
+    <div class="term">
+      <div class="term-bar"><i></i><i></i><i></i></div>
+<pre><span class="c-dim">$</span> dot apply              <span class="c-dim"># converge this machine</span>
+<span class="c-dim">$</span> dot apply --upgrade    <span class="c-dim"># also upgrade what is outdated</span>
+<span class="c-dim">$</span> dot apply docker       <span class="c-dim"># one bundle, and what it needs</span>
+<span class="c-dim">$</span> dot plan                <span class="c-dim"># what would change</span>
+<span class="c-dim">$</span> dot status              <span class="c-dim"># drift and orphans</span>
+<span class="c-dim">$</span> dot why docker         <span class="c-dim"># why it is (not) installed</span>
+<span class="c-dim">$</span> dot self-update        <span class="c-dim"># newest dot release</span></pre>
+    </div>
+  </div>
+</section>
+
+<section class="band">
+  <div class="wrap">
+    <div class="eyebrow">Make it yours</div>
+    <h2>Fork, edit, install.</h2>
+    <p class="lead">Fork <a href="https://github.com/trungngo/fresh-boot">the repository</a>, pick your set in <code>dot.yml</code>, change the
+      bundles to taste, and point the installer at your fork with <code>FRESH_BOOT_REPO</code>.
+      Every bundle's README explains what it does and why; <a href="https://github.com/trungngo/fresh-boot/blob/main/CLAUDE.md">CLAUDE.md</a>
+      holds the conventions for writing one.</p>
+    <div class="btns">
+      <a class="btn primary" href="https://github.com/trungngo/fresh-boot/fork">Fork on GitHub</a>
+      <a class="btn" href="https://github.com/trungngo/fresh-boot#readme">Read the README</a>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <div>fresh-boot · MIT licensed · built on <a href="https://trungngo.github.io/dot-cli/">dot</a></div>
+    <nav>
+      <a href="https://github.com/trungngo/fresh-boot">GitHub</a>
+      <a href="https://github.com/trungngo/fresh-boot/blob/main/README.md">README</a>
+      <a href="https://github.com/trungngo/fresh-boot/blob/main/docs/private-overlay.md">Your own settings</a>
+      <a href="https://trungngo.github.io/dot-cli/">dot</a>
+    </nav>
+  </div>
+</footer>
+
+<script>
+  // Copy buttons: copy the text of the element they point at.
+  document.querySelectorAll('[data-copy]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var el = document.querySelector(btn.getAttribute('data-copy'));
+      if (!el) return;
+      var text = el.textContent.trim();
+      var done = function () {
+        btn.textContent = 'Copied';
+        btn.classList.add('done');
+        setTimeout(function () { btn.textContent = 'Copy'; btn.classList.remove('done'); }, 1600);
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(done, function () {});
+      }
+    });
+  });
+
+  // macOS / Windows tabs.
+  var tabs = document.querySelectorAll('[role="tab"]');
+  tabs.forEach(function (tab) {
+    tab.addEventListener('click', function () {
+      tabs.forEach(function (t) {
+        var on = t === tab;
+        t.setAttribute('aria-selected', on ? 'true' : 'false');
+        document.getElementById(t.getAttribute('aria-controls')).hidden = !on;
+      });
+    });
+  });
+</script>
+</body>
+</html>

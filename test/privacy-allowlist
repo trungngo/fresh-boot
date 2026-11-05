@@ -9,6 +9,9 @@ github.com/trungngo/fresh-boot
 githubusercontent.com/trungngo/fresh-boot
 trungngo/dot-cli
 trungngo/fresh-boot
+# The published project pages (landing pages of the two repositories).
+trungngo.github.io/dot-cli
+trungngo.github.io/fresh-boot
 # The license names the copyright holder.
 Copyright (c) 2026 Trung Ngo
 # Public vendor addresses (signing-key uids in package-repository fixtures).
