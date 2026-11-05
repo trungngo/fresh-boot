@@ -2,8 +2,25 @@
 import os, sys
 from pathlib import Path
 if sys.version_info < (3, 11):
-    sys.stderr.write("tn: needs Python 3.11 or later (this is %d.%d)\n  run: dot apply common\n"
-                     % sys.version_info[:2])
+    # `env python3` found an old interpreter (macOS /usr/bin/python3 is 3.9, and a shell opened
+    # before `dot apply` has no Homebrew in front of it): look for a newer one and re-run with it.
+    import shutil, subprocess
+    if not os.environ.get("TN_REEXEC"):
+        names = ["python3.%d" % m for m in range(20, 10, -1)] + ["python3"]
+        found = [shutil.which(n) for n in names]
+        found += [str(Path(d) / "python3") for d in
+                  ("/opt/homebrew/bin", "/usr/local/bin", str(Path.home() / ".local/bin"))]
+        for exe in dict.fromkeys(f for f in found if f):
+            try:
+                ok = subprocess.run([exe, "-c", "import sys; sys.exit(sys.version_info < (3, 11))"],
+                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
+            except OSError:
+                ok = False
+            if ok:
+                os.environ["TN_REEXEC"] = "1"
+                os.execv(exe, [exe] + sys.argv)
+    sys.stderr.write("tn: needs Python 3.11 or later (this is %d.%d)\n"
+                     "  run: dot apply common   (then open a new terminal)\n" % sys.version_info[:2])
     sys.exit(3)
 home = Path(os.environ.get("TN_HOME") or Path.home() / ".local/share/tn")
 # Bytecode goes to the cache, never next to the copied sources: dot owns ~/.local/share/tn, and
