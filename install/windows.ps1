@@ -38,4 +38,22 @@ if (-not (Get-Command dot -ErrorAction SilentlyContinue) -and -not (Test-Path (J
 }
 $env:Path = "$dotBin;$env:Path"
 
+# dot's own installer adds its folder to the user's PATH, but it is skipped when dot.exe is
+# already there (an earlier or partial run), and then new terminals never find `dot`. Make sure
+# the user's PATH has it. Read and written raw (REG_EXPAND_SZ), so %VAR% entries stay unexpanded.
+if (Test-Path (Join-Path $dotBin 'dot.exe')) {
+    $envKey = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey('Environment')
+    try {
+        $userPath = [string]$envKey.GetValue('Path', '', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+        $entries = @(if ($userPath) { $userPath -split ';' | Where-Object { $_ } } else { @() })
+        if (@($entries | Where-Object { $_.TrimEnd('\') -ieq $dotBin }).Count -eq 0) {
+            $envKey.SetValue('Path', ((@($entries) + $dotBin) -join ';'), [Microsoft.Win32.RegistryValueKind]::ExpandString)
+            # Tell running programs (Explorer, new terminals) that the environment changed.
+            [Environment]::SetEnvironmentVariable('FRESH_BOOT_PATH_CHANGED', '1', 'User')
+            [Environment]::SetEnvironmentVariable('FRESH_BOOT_PATH_CHANGED', $null, 'User')
+            Write-Host "fresh-boot: added $dotBin to your PATH (open a new terminal to use dot)"
+        }
+    } finally { $envKey.Close() }
+}
+
 dot apply @args
