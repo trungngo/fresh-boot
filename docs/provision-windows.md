@@ -60,6 +60,7 @@ with winget, and dot re-reads the Path afterwards.
 
 | symptom | cause and fix |
 |---|---|
+| the install is blocked, or `dot.exe` is removed or will not run | `dot.exe` is not code-signed, so Windows Security reports it as a potentially unwanted app. Turn off Windows Security → App & browser control → Reputation-based protection settings → **Potentially unwanted app blocking**, run the installer again, then turn it back on |
 | `The term 'dot' is not recognized` after the installer | `install/windows.ps1` adds `%LOCALAPPDATA%\Programs\dot` to your user Path; open a new terminal. If it still fails, add that folder to the Path by hand, or run it by its full path |
 | `The term 'dot' is not recognized` | `~\.local\bin` is not on this terminal's Path yet; open a new terminal after the first `dot apply` |
 | ``the interpreter `pwsh` is not installed (or not on PATH)`` | PowerShell 7 is missing, or the terminal predates it: `winget install --exact --id Microsoft.PowerShell`, then open a new terminal |

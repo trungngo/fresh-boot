@@ -129,6 +129,8 @@
   .copy:hover { color: var(--ink); }
   .copy.done { color: var(--ok); }
   .note { font-size: 14px; color: var(--muted); margin-top: 12px; }
+  .note[hidden] { display: none; }
+  .note.warn { color: var(--ink); background: var(--surface); border: 1px solid var(--warn); border-radius: 10px; padding: 10px 14px; max-width: 980px; }
 
   /* terminal */
   .term {
@@ -262,6 +264,10 @@
       <code id="one-liner-ps">irm https://raw.githubusercontent.com/trungngo/fresh-boot/main/install/windows.ps1 | iex</code>
       <button class="copy" type="button" data-copy="#one-liner-ps">Copy</button>
     </div>
+    <p class="note warn" data-os-panel="ps" hidden><strong>Windows blocks dot.exe at first.</strong> It is not code-signed, so
+      Windows Security reports it as a potentially unwanted app. Before you run the command, open
+      <b>Windows Security → App &amp; browser control → Reputation-based protection settings</b> and turn off
+      <b>Potentially unwanted app blocking</b>. Turn it back on once the install has finished.</p>
     <p class="note">macOS and Ubuntu / Debian, or Windows PowerShell (the least tested). No GitHub login, token or account needed. <a href="https://github.com/trungngo/fresh-boot/tree/main/install">Read the scripts first</a>.</p>
   </div>
 </section>

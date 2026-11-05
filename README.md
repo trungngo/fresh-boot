@@ -8,6 +8,11 @@
 
     irm https://raw.githubusercontent.com/trungngo/fresh-boot/main/install/windows.ps1 | iex
 
+> Windows blocks `dot.exe` at first: it is not code-signed, so Windows Security reports it as a
+> potentially unwanted app. Before the command, turn off **Windows Security → App & browser
+> control → Reputation-based protection settings → Potentially unwanted app blocking**, and turn
+> it back on after the install.
+
 One command on a new machine installs the software you use and sets it up. fresh-boot is a set
 of **bundles** (git, zsh, tmux, vim, Ghostty, Tailscale, the GitHub and GitLab CLIs, plus
 dozens of opt-in ones) for macOS, Ubuntu desktop, Ubuntu server and Windows, driven by
