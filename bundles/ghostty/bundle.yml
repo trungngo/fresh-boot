@@ -1,0 +1,40 @@
+# yaml-language-server: $schema=https://github.com/trungngo/dot-cli/releases/latest/download/bundle.schema.json
+#
+# Ghostty: the terminal and its config. Ghostty has no Ubuntu/Debian package and no apt repo;
+# mkasberg/ghostty-ubuntu publishes a .deb per release. See README.md.
+name: ghostty
+description: Ghostty terminal and its config
+requires: [common]
+when: { os: [linux, macos], role: desktop }
+
+steps:
+  - label: Install Ghostty
+    when: { os: macos }
+    package:
+      cask: [ghostty]
+
+  # Assets are ghostty_<version>_<arch>_<release>.deb, one per Ubuntu version (24.04, 25.10,
+  # ...) and Debian codename (trixie, forky), so the glob picks by the `version` fact on
+  # Ubuntu and the `codename` fact on Debian. No asset for this release = the step fails
+  # (see the releases page); nothing falls back to another release's build.
+  - label: Install Ghostty (.deb from ghostty-ubuntu, Ubuntu)
+    when: { os: linux, distro: ubuntu }
+    github_release:
+      repo: mkasberg/ghostty-ubuntu
+      package: ghostty
+      asset:
+        linux/x86_64: "ghostty_*_amd64_{{ version }}.deb"
+        linux/aarch64: "ghostty_*_arm64_{{ version }}.deb"
+
+  - label: Install Ghostty (.deb from ghostty-ubuntu, Debian)
+    when: { os: linux, distro: debian }
+    github_release:
+      repo: mkasberg/ghostty-ubuntu
+      package: ghostty
+      asset:
+        linux/x86_64: "ghostty_*_amd64_{{ codename }}.deb"
+        linux/aarch64: "ghostty_*_arm64_{{ codename }}.deb"
+
+  - label: Link the Ghostty config
+    link:
+      ~/.config/ghostty/config: config

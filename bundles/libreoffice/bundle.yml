@@ -1,0 +1,15 @@
+# yaml-language-server: $schema=https://github.com/trungngo/dot-cli/releases/latest/download/bundle.schema.json
+#
+# LibreOffice, the maintained successor of OpenOffice, from the Ubuntu / Debian archive: the
+# full suite (Writer, Calc, Impress, Draw, Base, Math) with GNOME / GTK integration. See README.md.
+name: libreoffice
+description: LibreOffice office suite (Ubuntu desktop)
+requires: [common]
+when: { os: linux, family: debian, role: desktop }
+
+steps:
+  # `libreoffice` is the metapackage for the whole suite. libreoffice-gnome (GTK 3 widgets, GIO
+  # file access) is only one of several alternative Recommends, so it is named explicitly.
+  - label: Install LibreOffice
+    package:
+      apt: [libreoffice, libreoffice-gnome]

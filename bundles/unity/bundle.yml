@@ -1,0 +1,23 @@
+# yaml-language-server: $schema=https://github.com/trungngo/dot-cli/releases/latest/download/bundle.schema.json
+#
+# Unity Hub, Unity's installer and launcher for its editors: the cask on macOS, winget on
+# Windows. Editors are installed from the Hub (each project names its own editor version, and
+# the Hub needs a signed-in Unity account and a licence), so no editor is installed here.
+# See README.md.
+name: unity
+description: Unity Hub (macOS and Windows)
+requires: [common]
+when: { os: [macos, windows], role: desktop }
+
+steps:
+  - label: Install Unity Hub
+    package:
+      cask: [unity-hub]
+      winget: [Unity.UnityHub]
+
+  # The Unity CLI's installer puts its binaries in ~/.unity/bin and appends
+  # `. "$HOME/.unity/env"` (a PATH line) to ~/.zshrc, which is this repo's zshrc: the PATH
+  # comes from here instead, and that line must not be committed.
+  - label: Unity CLI on PATH
+    when: { os: macos }
+    path: ["~/.unity/bin"]

@@ -1,0 +1,27 @@
+# yaml-language-server: $schema=https://github.com/trungngo/dot-cli/releases/latest/download/bundle.schema.json
+#
+# Zoom Workplace. Linux: Zoom's own .deb (x86_64; it sets up no apt repository); macOS the cask,
+# Windows winget. Nothing is linked: Zoom keeps its settings with your Zoom account and in its
+# own directories. See README.md.
+name: zoom
+description: Zoom Workplace (meetings) desktop client
+requires: [common]
+when: { role: desktop }
+
+steps:
+  # `latest` redirects to the current build on cdn.zoom.us. Zoom publishes no arm64 .deb (the
+  # same URL with zoom_arm64.deb is refused). The .deb's install script adds no apt source (it
+  # registers MIME types and an AppArmor profile), so updates come from this step: dot
+  # re-downloads when Zoom's server reports a changed file (ETag / Last-Modified).
+  - label: Install Zoom (.deb from Zoom)
+    when: { os: linux, family: debian, arch: x86_64 }
+    download:
+      url: https://zoom.us/client/latest/zoom_amd64.deb
+      package: zoom
+
+  # The cask is a .pkg: Homebrew asks for the sudo password in the terminal.
+  - label: Install Zoom
+    when: { os: [macos, windows] }
+    package:
+      cask: [zoom]
+      winget: [Zoom.Zoom]

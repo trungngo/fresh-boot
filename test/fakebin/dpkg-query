@@ -1,0 +1,23 @@
+#!/bin/sh
+# Fake dpkg-query -W -f FORMAT <names> (also -f=FORMAT / --showformat=FORMAT, as dot passes it
+# with a real tab): installed names are the lines of $FAKE_STATE/apt. A format asking for
+# ${Status} (dot's package-file check) gets "install ok installed<TAB>2.0", any other format
+# "<name><TAB>ii "; a name not installed makes the exit status 1.
+echo "dpkg-query $*" >> "$FAKE_LOG"
+fmt=""; names=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -f|--showformat) fmt=$2; shift ;;
+    -f=*|--showformat=*) fmt=${1#*=} ;;
+    -*) ;;
+    *) names="$names $1" ;;
+  esac
+  shift
+done
+rc=0
+for p in $names; do
+  if ! grep -qxF -e "$p" "$FAKE_STATE/apt" 2>/dev/null; then rc=1
+  else case "$fmt" in *'${Status}'*) printf 'install ok installed\t2.0\n' ;; *) printf '%s\tii \n' "$p" ;; esac
+  fi
+done
+exit $rc

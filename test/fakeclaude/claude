@@ -1,0 +1,20 @@
+#!/bin/sh
+# Fake Claude Code CLI, put in ~/.local/bin by the fake claude.ai/install.sh (test/fakebin/curl).
+# Logs its argv; `plugin install <id>` records <id> in $FAKE_STATE/claude-plugins (a bare name is
+# `@claude-plugins-official`, or with `--marketplace <owner>/<repo>` `@<repo>`), and `plugin list
+# --json` prints them as `[{"id": ...}]`. Anything else succeeds silently.
+echo "claude $*" >> "$FAKE_LOG"
+state="$FAKE_STATE/claude-plugins"
+[ "$1" = plugin ] || [ "$1" = plugins ] || exit 0
+case "$2" in
+  install|i)
+    id=$3; market=claude-plugins-official; shift 3
+    while [ $# -gt 0 ]; do [ "$1" = --marketplace ] && market=${2##*/}; shift; done
+    case "$id" in *@*) ;; *) id="$id@$market" ;; esac
+    mkdir -p "$FAKE_STATE" && touch "$state"
+    grep -qxF "$id" "$state" || echo "$id" >> "$state" ;;
+  list)
+    sep=; printf '['
+    [ -f "$state" ] && while read -r id; do printf '%s{"id": "%s", "scope": "user", "enabled": true}' "$sep" "$id"; sep=", "; done < "$state"
+    printf ']\n' ;;
+esac

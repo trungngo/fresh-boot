@@ -1,0 +1,1592 @@
+"""tn plugin for the projects bundle: proj, repo, ws and cd (docs/tn.md §7.1).
+
+The machine keeps its work in one tree (docs/tn.md §3.1)::
+
+    <projects root>/<project>/<ws>/<repo>     ~/myprojects/acme/src/shop
+
+where <ws> is ``src`` (the original) or ``src-NN`` (a parallel workspace of clean clones).
+
+Python API for other plugins
+----------------------------
+
+A plugin that lists ``requires=["projects"]`` (and whose bundle requires ``projects``) may::
+
+    from tn.plugins import projects
+
+    where = projects.resolve(ctx, target, ws=None, prefer_repo=False, what="target")
+        # target: None (the Context), a directory (has a separator and exists, or starts with
+        # ".", "~" or is absolute), "project/repo[@ws]", "project[@ws]", or a bare word
+        # (project, repo, remote path). ws="NN"/"name" moves to the
+        # same place in that workspace; ws="new" runs ws_new() first. Picks (§2.5) or exits 2.
+    where.path, where.ctx, where.name, where.git_root, where.workspace_created
+    where.session("claude")  -> "claude-acme-shop-02"
+    where.label()            -> "Acme Shop #U1-02" (exit 3 without MY_MACHINE)
+    session_name(ctx_or_where, kind)   the same as .session(kind)
+
+    iter_projects(cfg, root=None) -> Iterator[ProjectRef]      name, root_key, root, path
+    iter_repos(project_dir, ws=None | "all" | "src-02") -> Iterator[RepoRef]
+    workspaces(project_dir) -> list[str]                        ["src", "src-01", ...]
+    ws_dir_name(id) -> str                                      "01" -> "src-01", "00" -> "src"
+    repo_state(repo_dir, fetch=False, *, cfg=None, expected=None) -> RepoState   (repo ls row)
+    default_branch(repo_dir) -> str | None
+    ws_new(ctx, id=None) -> WsResult                            (tn ws new; claude --ws new)
+    ws_blockers(repo_dir) -> list[str]                          why `tn ws rm` would refuse
+    identity_for(ctx) -> Person | None                          project identity, else me
+    set_identity(repo_dir, person)                              git config user.name/email
+    project_identity(cfg, project_dir) -> Person | None         the tn.toml identity only
+    add_remote(ctx, forge_key, *, repo_dir, name=None, path=None, fetch=True) -> dict
+        # what `tn git remote add` does: {"name", "url", "forge", "path", "fetched"}
+    read_remotes(repo_dir) -> list[(name, url)]                 from .git/config, no subprocess
+    read_identity(repo_dir) -> (name, email)                    local user.*, no subprocess
+    GITATTRIBUTES                                               what `git init` writes
+
+Every function takes paths as ``Path`` or ``str``. Nothing here prompts unless tn.pick would.
+"""
+
+from __future__ import annotations
+
+import os
+import re
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Iterator
+
+from tn import (Cancelled, Context, Fail, Person, Plugin, Problem, UsageError, arg,
+                ask, can_prompt, capture, clock, confirm, fs, git, need, out, pick, run,
+                split_url)
+from tn.match import subsequence
+
+plugin = Plugin("projects", help="projects, repos, workspaces, and cd",
+                groups=["proj", "repo", "ws", "cd"])
+
+NAME_RE = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
+REPO_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9._-]*$")
+GITATTRIBUTES = "* text=auto\n*.sh text eol=lf\n"
+MARKERS = ("manage.py", "package.json", "pyproject.toml", "Cargo.toml", "go.mod", "Dockerfile")
+DEFAULT_PROJ_DIRS = ["src", "bin", "rel", "key", "tmp"]
+
+
+# == small helpers ==========================================================================
+
+
+def _short(path) -> str:
+    """``~/myprojects/x`` for text output."""
+    p = str(path)
+    home = str(Path.home())
+    if p == home:
+        return "~"
+    if home and p.startswith(home.rstrip(os.sep) + os.sep):
+        return "~" + os.sep + p[len(home.rstrip(os.sep)) + 1:]
+    return p
+
+
+def _under(path, root) -> bool:
+    a, b = os.path.normpath(str(path)), os.path.normpath(str(root))
+    if os.name == "nt":
+        a, b = os.path.normcase(a), os.path.normcase(b)
+    return a == b or a.startswith(b.rstrip(os.sep) + os.sep)
+
+
+def _is_repo(path) -> bool:
+    return (Path(path) / ".git").exists()
+
+
+def _ws_id(ws: str | None) -> str | None:
+    if ws is None:
+        return None
+    if ws == "src":
+        return "00"
+    if ws.startswith("src-") and len(ws) > 4:
+        return ws[4:]
+    return ws
+
+
+def ws_dir_name(ident: str) -> str:
+    """``01`` / ``src-01`` -> ``src-01``; ``00`` / ``src`` -> ``src``;
+    ``review`` -> ``src-review``."""
+    ident = str(ident).strip().strip("/\\")
+    if ident in ("src", "00"):
+        return "src"
+    if ident.startswith("src-"):
+        return ident
+    return "src-" + ident
+
+
+def _check_name(value: str, what: str, pattern=NAME_RE) -> str:
+    if not pattern.match(value or ""):
+        raise UsageError("invalid %s %r: use lowercase letters, digits, '.', '_' and '-', "
+                         "starting with a letter or digit" % (what, value)
+                         if pattern is NAME_RE else
+                         "invalid %s %r: letters, digits, '.', '_' and '-' only" % (what, value))
+    return value
+
+
+def _emit_path(ctx: Context, path, cd: bool) -> None:
+    """Text mode: the path on stdout; ``--cd`` asks the shell function to go there."""
+    if ctx.options.json:
+        if cd:
+            ctx.request_cd(path)
+        return
+    if cd and not os.environ.get("TN_CD_FILE"):
+        ctx.request_cd(path)          # prints the path itself, with a hint
+        return
+    out.line(str(path))
+    if cd:
+        ctx.request_cd(path)
+
+
+def _records(ctx: Context, rows: list, columns: list, empty: str, text=None) -> None:
+    """out.records, with an optional per-row transform used for text output only."""
+    if text is not None and not ctx.options.json:
+        rows = [text(dict(r)) for r in rows]
+    out.records(rows, columns, empty=empty)
+
+
+# == .git/config without a subprocess =======================================================
+
+
+def _git_dir(repo_dir) -> Path | None:
+    g = Path(repo_dir) / ".git"
+    if g.is_dir():
+        return g
+    if g.is_file():
+        try:
+            text = g.read_text(encoding="utf-8", errors="replace").strip()
+        except OSError:
+            return None
+        if text.startswith("gitdir:"):
+            p = Path(text[len("gitdir:"):].strip())
+            if not p.is_absolute():
+                p = Path(repo_dir) / p
+            return p
+    return None
+
+
+def _config_file(repo_dir) -> Path | None:
+    gd = _git_dir(repo_dir)
+    if gd is None:
+        return None
+    common = gd / "commondir"
+    if common.is_file():
+        try:
+            c = Path(common.read_text(encoding="utf-8").strip())
+            gd = c if c.is_absolute() else gd / c
+        except OSError:
+            pass
+    return gd / "config"
+
+
+def _parse_git_config(repo_dir) -> list:
+    """[(section, subsection, key, value)] from the repo's own config file, in file order."""
+    f = _config_file(repo_dir)
+    if f is None:
+        return []
+    try:
+        text = f.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return []
+    items = []
+    section, sub = "", None
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line[0] in "#;":
+            continue
+        m = re.match(r'^\[\s*([A-Za-z0-9.-]+)(?:\s+"((?:[^"\\]|\\.)*)")?\s*\]\s*(.*)$', line)
+        if m:
+            section = m.group(1).lower()
+            sub = m.group(2).replace('\\"', '"').replace("\\\\", "\\") if m.group(2) else None
+            if "." in section and sub is None:          # [remote.origin] (old syntax)
+                section, sub = section.split(".", 1)
+            line = m.group(3).strip()
+            if not line:
+                continue
+        m = re.match(r"^([A-Za-z][A-Za-z0-9-]*)\s*(?:=\s*(.*))?$", line)
+        if not m:
+            continue
+        value = m.group(2)
+        if value is None:
+            value = "true"
+        else:
+            value = re.sub(r'\s[#;].*$', "", value) if '"' not in value else value
+            value = value.strip()
+            if len(value) >= 2 and value[0] == value[-1] == '"':
+                value = value[1:-1]
+            value = value.replace('\\"', '"').replace("\\\\", "\\")
+        items.append((section, sub, m.group(1).lower(), value))
+    return items
+
+
+def read_remotes(repo_dir) -> list:
+    """[(name, url)] of the repo's remotes, in config order, read from .git/config."""
+    seen: dict = {}
+    for section, sub, key, value in _parse_git_config(repo_dir):
+        if section == "remote" and sub and key == "url" and sub not in seen:
+            seen[sub] = value
+    return list(seen.items())
+
+
+def read_identity(repo_dir) -> tuple:
+    """(user.name, user.email) set locally in the repo, each None when unset."""
+    name = email = None
+    for section, sub, key, value in _parse_git_config(repo_dir):
+        if section == "user" and sub is None:
+            if key == "name":
+                name = value
+            elif key == "email":
+                email = value
+    return name, email
+
+
+# == projects, workspaces, repos ============================================================
+
+
+@dataclass(frozen=True)
+class ProjectRef:
+    name: str
+    root_key: str
+    root: Path
+    path: Path
+
+    @property
+    def kind(self) -> str:
+        return "projects"
+
+
+@dataclass(frozen=True)
+class RepoRef:
+    project: str
+    ws: str
+    ws_id: str
+    name: str
+    path: Path
+
+
+def iter_projects(cfg, root: str | None = None) -> Iterator[ProjectRef]:
+    """Every project directory under the roots, in root then name order."""
+    for key, rdir in cfg.roots.items():
+        if root is not None and key != root:
+            continue
+        try:
+            entries = sorted(Path(rdir).iterdir(), key=lambda p: p.name)
+        except OSError:
+            continue
+        for e in entries:
+            if e.name.startswith(".") or not e.is_dir():
+                continue
+            yield ProjectRef(e.name, key, Path(rdir), e)
+
+
+def workspaces(project_dir) -> list:
+    """``src`` then ``src-*`` directory names in the project, sorted."""
+    try:
+        names = [e.name for e in Path(project_dir).iterdir()
+                 if e.is_dir() and (e.name == "src" or e.name.startswith("src-"))]
+    except OSError:
+        return []
+    return sorted(names, key=lambda n: (n != "src", n))
+
+
+def iter_repos(project_dir, ws: str | None = None) -> Iterator[RepoRef]:
+    """Git repos directly inside a workspace (default ``src``; ``"all"``: every workspace)."""
+    pdir = Path(project_dir)
+    names = workspaces(pdir) if ws == "all" else [ws_dir_name(ws) if ws else "src"]
+    for w in names:
+        wdir = pdir / w
+        try:
+            entries = sorted(wdir.iterdir(), key=lambda p: p.name)
+        except OSError:
+            continue
+        for e in entries:
+            if not e.name.startswith(".") and e.is_dir() and _is_repo(e):
+                yield RepoRef(pdir.name, w, _ws_id(w) or w, e.name, e)
+
+
+def _find_projects(cfg, name: str) -> list:
+    return [p for p in iter_projects(cfg) if p.name == name]
+
+
+def _project_ctx(ctx: Context, name: str | None) -> Context:
+    """The Context of project ``name`` (any root), else of the Context's project (exit 2)."""
+    if not name:
+        ctx.require("project")
+        return ctx.for_path(ctx.project_dir)
+    found = _find_projects(ctx.config, name)
+    if not found:
+        names = sorted({p.name for p in iter_projects(ctx.config)})
+        import difflib
+        close = difflib.get_close_matches(name, names, n=5)
+        raise UsageError("no project %r" % name, choices=close or None,
+                         hint="tn proj new %s creates it" % name if NAME_RE.match(name) else None)
+    if len(found) == 1:
+        return ctx.for_path(found[0].path)
+    p = pick(found, label=lambda p: "%s (%s)  %s" % (p.name, p.root_key, _short(p.path)),
+             prompt="project", what="which project?")
+    return ctx.for_path(p.path)
+
+
+# == identity ===============================================================================
+
+
+def project_identity(cfg, project_dir) -> Person | None:
+    """The person named by ``identity`` in the project's tn.toml (not ``me``), or None."""
+    try:
+        pc = cfg.project_config(Path(project_dir).name, Path(project_dir))
+    except Exception:  # noqa: BLE001 - an invalid tn.toml is reported by tn doctor
+        return None
+    if not pc.identity:
+        return None
+    return cfg.person(pc.identity)
+
+
+def identity_for(ctx: Context) -> Person | None:
+    """The project's ``identity`` person, else ``me``, else None (§7.1.5)."""
+    cfg = ctx.config
+    pc = cfg.project
+    if pc is not None and pc.identity:
+        p = cfg.person(pc.identity)
+        if p is not None:
+            return p
+        out.warn("identity %r in %s is not a known person (people come from conf.d/git-private.toml)"
+                 % (pc.identity, _short(pc.file)))
+    return cfg.person("me")
+
+
+def set_identity(repo_dir, person: Person | None) -> None:
+    """``git config user.name`` / ``user.email`` local to the repo; a hint when None."""
+    if person is None:
+        out.hint("no identity for this project (identity in tn.toml, or MY_NAME/MY_EMAIL): "
+                 "the global git identity applies")
+        return
+    run(["git", "-C", str(repo_dir), "config", "user.name", person.name], quiet=True)
+    run(["git", "-C", str(repo_dir), "config", "user.email", person.email], quiet=True)
+
+
+def _identity_json(p: Person | None):
+    return None if p is None else {"key": p.key, "name": p.name, "email": p.email}
+
+
+# == remotes ================================================================================
+
+
+def add_remote(ctx: Context, forge_key: str, *, repo_dir, name: str | None = None,
+               path: str | None = None, fetch: bool = True) -> dict:
+    """Add the forge's remote to ``repo_dir`` as ``tn git remote add`` does (§7.5).
+
+    ``ctx`` is the repo's Context (its project and repo fill the forge's path template)."""
+    cfg = ctx.config
+    forge = cfg.forge(forge_key)
+    if path is None:
+        if ctx.project is None:
+            raise UsageError("outside a project: pass --path <namespace/repo>")
+        pc = cfg.project
+        group = pc.raw.get("group") if pc is not None and isinstance(pc.raw.get("group"), str) \
+            else None
+        path = forge.repo_path(project=ctx.project, repo=ctx.repo or Path(repo_dir).name,
+                               group=group or None)
+    url = forge.url(path)
+    rname = name or forge.remote or forge.key
+    existing = dict(read_remotes(repo_dir)).get(rname)
+    if existing is not None:
+        if existing == url:
+            out.info("remote %s already points at %s" % (rname, url))
+            return {"name": rname, "url": url, "forge": forge.key, "path": path,
+                    "fetched": False}
+        raise Fail("remote %s already exists with another url: %s" % (rname, existing))
+    run(["git", "-C", str(repo_dir), "remote", "add", rname, url], quiet=True)
+    fetched = False
+    if fetch:
+        rc = run(["git", "-C", str(repo_dir), "fetch", rname], check=False, quiet=True)
+        fetched = rc == 0 and not ctx.options.dry_run
+        if rc != 0:
+            create = {"gh": "gh repo create %s" % path,
+                      "glab": "glab repo create %s" % path}.get(forge.cli)
+            out.warn("fetch from %s failed; create it: %s%s" % (
+                rname, forge.web_url(path), " (%s)" % create if create else ""))
+    out.info("remote %s -> %s" % (rname, url))
+    return {"name": rname, "url": url, "forge": forge.key, "path": path, "fetched": fetched}
+
+
+# == repo state =============================================================================
+
+
+@dataclass
+class RepoState:
+    """One ``tn repo ls`` row (§7.1.2)."""
+
+    repo: str
+    project: str | None
+    ws_id: str | None
+    path: str
+    branch: str | None = None
+    head: str | None = None
+    dirty: int | None = None
+    ahead: int | None = None
+    behind: int | None = None
+    upstream: str | None = None
+    remote: str | None = None
+    remotes: list = field(default_factory=list)
+    identity: dict | None = None
+    identity_ok: bool | None = None
+    error: str | None = None
+
+    def to_json(self) -> dict:
+        return {"repo": self.repo, "project": self.project, "ws_id": self.ws_id,
+                "branch": self.branch, "dirty": self.dirty, "ahead": self.ahead,
+                "behind": self.behind, "remote": self.remote, "path": self.path,
+                "upstream": self.upstream, "remotes": self.remotes,
+                "identity": self.identity, "identity_ok": self.identity_ok,
+                "head": self.head, "error": self.error}
+
+
+def _load_cfg(cfg):
+    if cfg is not None:
+        return cfg
+    from tn import Config
+    return Config.load(lenient=True)
+
+
+def repo_state(repo_dir, fetch: bool = False, *, cfg=None, expected: Person | None = None
+               ) -> RepoState:
+    """Branch, dirty count, ahead/behind, remotes and identity of one repo (``git status
+    --porcelain=v2 --branch``; no network unless ``fetch``)."""
+    cfg = _load_cfg(cfg)
+    rdir = Path(repo_dir)
+    remotes = read_remotes(rdir)
+    if fetch:
+        for name, _ in remotes:
+            run(["git", "-C", str(rdir), "fetch", "--quiet", "--prune", name], check=False,
+                quiet=True)
+    st = RepoState(repo=rdir.name, project=rdir.parent.parent.name,
+                   ws_id=_ws_id(rdir.parent.name), path=str(rdir))
+    r = git(rdir, "status", "--porcelain=v2", "--branch")
+    if r.returncode != 0:
+        err = (r.stderr or "").strip().splitlines()
+        st.error = err[-1] if err else "git status failed"
+    else:
+        dirty = 0
+        for line in r.stdout.splitlines():
+            if line.startswith("# branch.oid "):
+                oid = line.split(" ", 2)[2]
+                st.head = None if oid == "(initial)" else oid
+            elif line.startswith("# branch.head "):
+                h = line.split(" ", 2)[2]
+                st.branch = None if h == "(detached)" else h
+            elif line.startswith("# branch.upstream "):
+                st.upstream = line.split(" ", 2)[2]
+            elif line.startswith("# branch.ab "):
+                m = re.match(r"# branch\.ab \+(\d+) -(\d+)", line)
+                if m:
+                    st.ahead, st.behind = int(m.group(1)), int(m.group(2))
+            elif line and not line.startswith("#"):
+                dirty += 1
+        st.dirty = dirty
+    rows = []
+    for name, url in remotes:
+        f = cfg.forge_for_url(url)
+        rows.append({"name": name, "url": url, "forge": f.key if f else None})
+    st.remotes = rows
+    chosen = None
+    if st.upstream:
+        names = sorted((n for n, _ in remotes), key=len, reverse=True)
+        for n in names:
+            if st.upstream.startswith(n + "/"):
+                chosen = n
+                break
+    if chosen is None and remotes:
+        chosen = remotes[0][0]
+    if chosen is not None:
+        url = dict(remotes)[chosen]
+        st.remote = cfg.forge_spec(url) or url
+    name, email = read_identity(rdir)
+    st.identity = {"name": name, "email": email} if (name or email) else None
+    if expected is not None:
+        st.identity_ok = bool(email) and email.lower() == expected.email.lower()
+    return st
+
+
+def _branch_text(r: dict) -> dict:
+    if r.get("branch") is None and r.get("head"):
+        r["branch"] = "(detached %s)" % r["head"][:7]
+    return r
+
+
+REPO_COLUMNS = [("repo", "REPO"), ("ws_id", "WS"), ("branch", "BRANCH"), ("dirty", "DIRTY"),
+                ("ahead", "AHEAD"), ("behind", "BEHIND"), ("remote", "REMOTE")]
+
+
+def _repo_rows(cfg, refs, fetch: bool) -> list:
+    rows = []
+    expected_by_project: dict = {}
+    for ref in refs:
+        pdir = ref.path.parent.parent
+        key = str(pdir)
+        if key not in expected_by_project:
+            expected_by_project[key] = project_identity(cfg, pdir)
+        rows.append(repo_state(ref.path, fetch, cfg=cfg,
+                               expected=expected_by_project[key]).to_json())
+    return rows
+
+
+# == default branch, workspace safety =======================================================
+
+
+def _ok(repo, *args) -> bool:
+    return git(repo, *args).returncode == 0
+
+
+def default_branch(repo_dir) -> str | None:
+    """``origin/HEAD`` minus ``origin/``; else a local ``main`` or ``master``; else the
+    checked-out branch (when it has a commit)."""
+    r = git(repo_dir, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD")
+    head = (r.stdout or "").strip()
+    if r.returncode == 0 and head:
+        return head[len("origin/"):] if head.startswith("origin/") else head
+    for cand in ("main", "master"):
+        if _ok(repo_dir, "show-ref", "--verify", "--quiet", "refs/heads/" + cand):
+            return cand
+    r = git(repo_dir, "symbolic-ref", "--quiet", "--short", "HEAD")
+    cur = (r.stdout or "").strip()
+    if r.returncode == 0 and cur and _ok(repo_dir, "show-ref", "--verify", "--quiet",
+                                        "refs/heads/" + cur):
+        return cur
+    return None
+
+
+_IN_PROGRESS = (("rebase-merge", "a rebase"), ("rebase-apply", "a rebase or git am"),
+                ("MERGE_HEAD", "a merge"), ("CHERRY_PICK_HEAD", "a cherry-pick"),
+                ("REVERT_HEAD", "a revert"))
+
+
+def _original_of(repo_dir) -> Path | None:
+    """``<project>/src/<repo>`` for a repo in ``<project>/src-NN/``, when that is a repo."""
+    rdir = Path(repo_dir)
+    if not rdir.parent.name.startswith("src-"):
+        return None
+    orig = rdir.parent.parent / "src" / rdir.name
+    return orig if _is_repo(orig) else None
+
+
+def ws_blockers(repo_dir, original=None) -> list:
+    """Why deleting this repo would lose work (§7.1.3 ``rm``); [] when it is safe.
+
+    A commit is safe when a remote-tracking ref reaches it, or when a ref (or HEAD) of the
+    original repo reaches it: ``original`` defaults to ``<project>/src/<repo>`` for a repo in a
+    ``src-NN`` workspace, so a copy of a repo without remotes can be removed."""
+    blockers = []
+    st = git(repo_dir, "status", "--porcelain")
+    if st.returncode != 0:
+        return ["git status failed"]
+    n = len([x for x in st.stdout.splitlines() if x.strip()])
+    if n:
+        blockers.append("%d uncommitted or untracked change%s" % (n, "" if n == 1 else "s"))
+    gd = _git_dir(repo_dir)
+    if gd is not None:
+        for marker, what in _IN_PROGRESS:
+            if (gd / marker).exists():
+                blockers.append("%s in progress" % what)
+                break
+    stash = git(repo_dir, "stash", "list")
+    if stash.returncode == 0 and stash.stdout.strip():
+        k = len(stash.stdout.strip().splitlines())
+        blockers.append("%d stash entr%s" % (k, "y" if k == 1 else "ies"))
+    has_head = _ok(repo_dir, "rev-parse", "--verify", "--quiet", "HEAD")
+    has_commits = has_head or bool(
+        git(repo_dir, "for-each-ref", "--count=1", "refs/heads", "refs/tags").stdout.strip())
+    if not has_commits:
+        return blockers
+    if original is None:
+        original = _original_of(repo_dir)
+    remotes = git(repo_dir, "remote").stdout.split()
+    if not remotes and original is None:
+        return blockers + ["no remote"]
+    # Everything local: HEAD (a detached HEAD too), every branch and tag.
+    rl = git(repo_dir, "rev-list", *(["HEAD"] if has_head else []), "--branches", "--tags",
+             "--not", "--remotes")
+    if rl.returncode != 0:
+        blockers.append("cannot compare local commits with the remotes")
+        return blockers
+    local = rl.stdout.split()
+    if local and original is not None:
+        known = git(original, "rev-list", "--all")
+        if known.returncode != 0:
+            blockers.append("cannot compare local commits with %s" % _short(original))
+            return blockers
+        seen = set(known.stdout.split())
+        local = [c for c in local if c not in seen]
+    c = len(local)
+    if c:
+        where = "on no remote" if original is None else \
+            "on no remote and not in %s/%s" % (Path(original).parent.name, Path(original).name)
+        blockers.append("%d commit%s %s" % (c, "" if c == 1 else "s", where))
+    return blockers
+
+
+def _sessions(ctx: Context) -> list:
+    """Every Session from every plugin's sessions hook (tn sessions), [] on any trouble."""
+    try:
+        from tn import loader
+        from tn.builtins import all_sessions
+        found, _ = all_sessions(ctx, loader.discover())
+        return list(found)
+    except Exception:  # noqa: BLE001 - listing sessions must never break a projects command
+        return []
+
+
+# == ws new =================================================================================
+
+
+@dataclass
+class WsRepo:
+    repo: str
+    state: str                       # copied | skipped | failed
+    branch: str | None = None
+    primary_remote: str | None = None
+    unpushed: int = 0
+    submodules: bool = False
+    reason: str | None = None
+
+    def to_json(self) -> dict:
+        return {"repo": self.repo, "state": self.state, "branch": self.branch,
+                "primary_remote": self.primary_remote, "unpushed": self.unpushed,
+                "submodules": self.submodules, "reason": self.reason}
+
+
+@dataclass
+class WsResult:
+    project: str
+    workspace: str
+    ws_id: str
+    path: Path
+    repos: list = field(default_factory=list)
+
+    def count(self, state: str) -> int:
+        return len([r for r in self.repos if r.state == state])
+
+    @property
+    def failed(self) -> int:
+        return self.count("failed")
+
+    def to_json(self) -> dict:
+        return {"project": self.project, "workspace": self.workspace, "ws_id": self.ws_id,
+                "path": str(self.path), "repos": [r.to_json() for r in self.repos]}
+
+
+class _GitError(Exception):
+    pass
+
+
+def _g(repo, *args) -> str:
+    r = git(repo, *args)
+    if r.returncode != 0:
+        err = (r.stderr or "").strip().splitlines()
+        raise _GitError("git %s: %s" % (args[0], err[-1] if err else "exit %d" % r.returncode))
+    return r.stdout
+
+
+def _ws_copy(source: Path, dest: Path, dry_run: bool) -> WsRepo:
+    name = source.name
+    if not _is_repo(source):
+        return WsRepo(name, "skipped", reason="not a git repository")
+    branch = default_branch(source)
+    if not branch:
+        return WsRepo(name, "skipped", reason="no branch to check out")
+    remotes = read_remotes(source)
+    primary = None
+    if remotes:
+        primary = "origin" if "origin" in dict(remotes) else remotes[0][0]
+    if dry_run:
+        out.would("run git clone --quiet %s %s (branch %s%s)"
+                  % (source, dest, branch, ", from %s" % primary if primary else ""))
+        return WsRepo(name, "copied", branch=branch, primary_remote=primary)
+    # A local clone hardlinks the objects and writes nothing to the source. Never `git
+    # worktree`: that writes into the source's .git.
+    r = capture(["git", "clone", "--quiet", str(source), str(dest)])
+    if r.returncode != 0:
+        err = (r.stderr or "").strip().splitlines()
+        return WsRepo(name, "failed", branch=branch,
+                      reason="git clone failed: %s" % (err[-1] if err else r.returncode))
+    try:
+        # The clone's origin/* are the source's local branches: start from the source's
+        # branch (it may not be the one the source has checked out).
+        if _ok(dest, "show-ref", "--verify", "--quiet", "refs/remotes/origin/" + branch):
+            _g(dest, "checkout", "--quiet", "-B", branch, "origin/" + branch)
+        if remotes:
+            # Removing origin takes its remote-tracking refs and branch config with it: no
+            # trace of the local path is left.
+            _g(dest, "remote", "remove", "origin")
+            for rname, url in remotes:
+                _g(dest, "remote", "add", rname, url)
+            f = git(dest, "fetch", "--quiet", "--prune", primary)
+            if f.returncode != 0:
+                out.debug("  %s: fetch from %s failed: %s" % (name, primary, f.stderr.strip()))
+            if _ok(dest, "show-ref", "--verify", "--quiet",
+                   "refs/remotes/%s/%s" % (primary, branch)):
+                _g(dest, "checkout", "--quiet", "-B", branch, "%s/%s" % (primary, branch))
+                _g(dest, "branch", "--quiet", "--set-upstream-to", "%s/%s" % (primary, branch),
+                   branch)
+                shown = "%s/%s" % (primary, branch)
+            else:
+                _g(dest, "checkout", "--quiet", branch)
+                shown = "%s (not on %s)" % (branch, primary)
+        else:
+            if not _ok(dest, "show-ref", "--verify", "--quiet", "refs/heads/" + branch):
+                raise _GitError("branch %s not found" % branch)
+            _g(dest, "checkout", "--quiet", branch)
+            _g(dest, "remote", "remove", "origin")
+            shown = "%s (no remote)" % branch
+        # Exactly one local branch: nothing of the source's local work comes along.
+        for stray in _g(dest, "for-each-ref", "--format=%(refname:short)",
+                        "refs/heads").split():
+            if stray != branch:
+                _g(dest, "branch", "-D", stray)
+    except _GitError as e:
+        return WsRepo(name, "failed", branch=branch, primary_remote=primary, reason=str(e))
+    res = WsRepo(name, "copied", branch=branch, primary_remote=primary)
+    out.info("  %s: %s" % (name, shown))
+    head = git(dest, "rev-parse", "HEAD").stdout.strip()
+    if head and _ok(source, "show-ref", "--verify", "--quiet", "refs/heads/" + branch):
+        c = git(source, "rev-list", "--count", "%s..refs/heads/%s" % (head, branch))
+        if c.returncode == 0 and c.stdout.strip().isdigit():
+            res.unpushed = int(c.stdout.strip())
+    if res.unpushed:
+        out.info("      note: src/%s is %d unpushed commit(s) ahead - not copied"
+                 % (name, res.unpushed))
+    if (dest / ".gitmodules").exists():
+        res.submodules = True
+        out.info("      note: has submodules - run 'git submodule update --init' in it")
+    return res
+
+
+def _next_ws(project_dir: Path) -> str:
+    n = 1
+    while (project_dir / ("src-%02d" % n)).exists():
+        n += 1
+    return "src-%02d" % n
+
+
+def ws_new(ctx: Context, id: str | None = None) -> WsResult:
+    """A parallel workspace ``src-NN`` beside ``src/``: a clean local clone of every repo in
+    ``src/``, each on its default branch, with the source's remotes (a port of src-new.sh)."""
+    ctx.require("project")
+    pdir = Path(ctx.project_dir)
+    src = pdir / "src"
+    if id:
+        name = ws_dir_name(id)
+        if name == "src":
+            raise UsageError("src is the original workspace; pick another id (01, review)")
+        _check_name(name, "workspace", REPO_RE)
+    else:
+        name = _next_ws(pdir)
+    target = pdir / name
+    if target.exists():
+        raise Fail("%s already exists" % _short(target))
+    if not src.is_dir():
+        raise Fail("%s does not exist - nothing to copy" % _short(src))
+    need("git", "dot apply git")
+    out.info("Parallel workspace %s\n  from %s\n  into %s" % (name, _short(src), _short(target)))
+    fs.mkdir(target)
+    result = WsResult(ctx.project, name, _ws_id(name) or name, target)
+    for entry in sorted(src.iterdir(), key=lambda p: p.name):
+        if entry.name.startswith("."):
+            continue
+        res = _ws_copy(entry, target / entry.name, ctx.options.dry_run)
+        if res.state == "skipped":
+            out.info("  %s: skipped, %s" % (res.repo, res.reason))
+        elif res.state == "failed":
+            out.info("  %s: FAILED: %s" % (res.repo, res.reason))
+        result.repos.append(res)
+    out.info("Created %s - %d copied, %d skipped, %d failed"
+             % (_short(target), result.count("copied"), result.count("skipped"), result.failed))
+    out.hint("gitignored files (.env, node_modules, .claude/settings.local.json) do not come "
+             "along; the workspace is a new, untrusted path for Claude, and tn claude start "
+             "trusts it")
+    return result
+
+
+# == resolve ================================================================================
+
+
+@dataclass
+class Where:
+    """What ``resolve`` found: a directory and its Context."""
+
+    path: Path
+    ctx: Context
+    workspace_created: str | None = None
+
+    @property
+    def name(self) -> str | None:
+        return self.ctx.name
+
+    @property
+    def git_root(self) -> Path | None:
+        p = Path(self.path)
+        while True:
+            if (p / ".git").exists():
+                return p
+            if p.parent == p:
+                return None
+            p = p.parent
+
+    def session(self, kind: str) -> str:
+        return self.ctx.session(kind)
+
+    def label(self) -> str:
+        return self.ctx.label()
+
+    def to_json(self) -> dict:
+        return {"path": str(self.path), "name": self.name, "slug": self.ctx.slug,
+                "kind": self.ctx.kind, "project": self.ctx.project, "ws": self.ctx.ws,
+                "repo": self.ctx.repo,
+                "git_root": str(self.git_root) if self.git_root else None,
+                "workspace_created": self.workspace_created}
+
+
+def session_name(ctx_or_where, kind: str) -> str:
+    """``<kind>-<slug>`` for a Context or a Where (``claude-acme-shop-02``)."""
+    return ctx_or_where.session(kind)
+
+
+def _looks_like_path(t: str) -> bool:
+    return (t.startswith(".") or t.startswith("~") or os.path.isabs(t)
+            or (os.sep != "/" and os.sep in t))
+
+
+def _target_for(cfg, path: Path) -> tuple:
+    """(``project/repo[@ws]`` as resolve() accepts it back, root key or None)."""
+    for key, rdir in cfg.roots.items():
+        if _under(path, rdir):
+            parts = Path(os.path.relpath(path, rdir)).parts
+            s = parts[0] if parts else str(path)
+            if len(parts) >= 3:
+                s += "/" + parts[2]
+            if len(parts) >= 2 and parts[1] != "src":
+                s += "@" + (_ws_id(parts[1]) or parts[1])
+            return s, key
+    return str(path), None
+
+
+def _pick_target(cfg, cands: list, prompt: str, question: str) -> Path:
+    """One of ``cands``. A choice (exit 2 ``choices``) is a target resolve() accepts as given:
+    ``project/repo``; one that would match more than one candidate is the absolute path."""
+    found = [_target_for(cfg, p) for p in cands]
+    counts: dict = {}
+    for t, _ in found:
+        counts[t] = counts.get(t, 0) + 1
+    values = [t if counts[t] == 1 else str(p) for (t, _), p in zip(found, cands)]
+    if len(cands) > 1 and not can_prompt():
+        raise UsageError(question, choices=values)
+    labels = {str(p): v for p, v in zip(cands, values)}
+    return pick(cands, label=lambda p: labels[str(p)], prompt=prompt, what=question)
+
+
+def _dedupe(paths) -> list:
+    seen, res = set(), []
+    for p in paths:
+        k = os.path.normcase(os.path.normpath(str(p)))
+        if k not in seen:
+            seen.add(k)
+            res.append(Path(p))
+    return res
+
+
+def _find_targets(ctx: Context, t: str) -> list:
+    cfg = ctx.config
+    roots = cfg.roots
+    if "/" in t:
+        p, _, r = t.partition("/")
+        if not p or not r or "/" in r:
+            return []
+        found = []
+        for key, rdir in roots.items():
+            cand = Path(rdir) / p / "src" / r
+            if cand.is_dir():
+                found.append(cand)
+        return _dedupe(found)
+    # A bare word: a project; a repo; a remote path.
+    found = [Path(rdir) / t for rdir in roots.values() if (Path(rdir) / t).is_dir()]
+    if found:
+        return _dedupe(found)
+    if ctx.project_dir is not None:
+        here = Path(ctx.project_dir) / (ctx.ws or "src") / t
+        if here.is_dir():
+            return [here]
+    found = [ref.path for p in iter_projects(cfg) for ref in iter_repos(p.path)
+             if ref.name == t]
+    if found:
+        return _dedupe(found)
+    tl = t.lower()
+    for p in iter_projects(cfg):
+        for ref in iter_repos(p.path):
+            for _, url in read_remotes(ref.path):
+                _, rpath = split_url(url)
+                if rpath and (rpath.lower() == tl or rpath.lower().rsplit("/", 1)[-1] == tl):
+                    found.append(ref.path)
+                    break
+    return _dedupe(found)
+
+
+def resolve(ctx: Context, target: str | None, *, ws: str | None = None,
+            prefer_repo: bool = False, what: str = "target") -> Where:
+    """Resolve a command's target to a directory and its Context (docs/tn.md §7.1.7)."""
+    question = what if what.endswith("?") else "which %s?" % what
+    wsuffix = None
+    if target is None or target == "":
+        base = Path(ctx.path)
+    else:
+        t = target.strip()
+        path_like = _looks_like_path(t)
+        if not path_like and "@" in t:
+            t, _, wsuffix = t.rpartition("@")
+            if not t:
+                raise UsageError("%r: nothing before @" % target)
+        if path_like:
+            p = Path(os.path.expanduser(t))
+            if not p.is_absolute():
+                p = Path(ctx.cwd) / p
+            p = Path(os.path.normpath(str(p)))
+            if not p.is_dir():
+                raise UsageError("no such directory: %s" % t)
+            base = p
+        else:
+            cands = _find_targets(ctx, t)
+            if not cands and "/" in t:
+                p = Path(os.path.normpath(str(Path(ctx.cwd) / t)))
+                if p.is_dir() and wsuffix is None:
+                    cands = [p]
+            if not cands:
+                raise UsageError('no project or repo matches "%s"' % target,
+                                 hint="tn proj ls and tn repo ls --all list them")
+            base = _pick_target(ctx.config, cands, what.rstrip("?"), question)
+    wctx = ctx.for_path(base)
+    created = None
+    wsel = ws if ws not in (None, "") else wsuffix
+    if wsel is not None:
+        if wctx.project is None:
+            raise UsageError("a workspace needs a project: pass a target inside one")
+        pdir = Path(wctx.project_dir)
+        if wsel == "new":
+            res = ws_new(ctx.for_path(pdir), None)
+            if res.failed:
+                out.warn("%d repo(s) failed to copy into %s" % (res.failed, res.workspace))
+            wname = res.workspace
+            created = wname
+        else:
+            wname = _check_name(ws_dir_name(wsel), "workspace", REPO_RE)
+        wdir = pdir / wname
+        dry_new = created is not None and ctx.options.dry_run
+        if not wdir.is_dir() and not dry_new:
+            raise UsageError("no workspace %s in %s: tn ws new %s"
+                             % (wname, wctx.project, _ws_id(wname)))
+        newp = wdir
+        if wctx.repo:
+            newp = wdir / wctx.repo
+            if not newp.is_dir() and not dry_new:
+                raise UsageError("no repo %s in %s/%s" % (wctx.repo, wctx.project, wname))
+        wctx = ctx.for_path(newp)
+    if prefer_repo and wctx.repo is None and wctx.project is not None:
+        repos = list(iter_repos(wctx.project_dir, wctx.ws or "src"))
+        if len(repos) == 1:
+            wctx = ctx.for_path(repos[0].path)
+    return Where(path=Path(wctx.path), ctx=wctx, workspace_created=created)
+
+
+def _repo_ctx(ctx: Context, target: str | None) -> Context:
+    """A repo Context from a target or the Context; at a project, pick among its repos."""
+    where = resolve(ctx, target, prefer_repo=True, what="which repo?")
+    w = where.ctx
+    if w.repo is not None:
+        return ctx.for_path(w.repo_dir)
+    if w.project is None:
+        if target is None:
+            ctx.require("repo")
+        raise UsageError("%s is not a repo" % target)
+    repos = list(iter_repos(w.project_dir, w.ws or "src"))
+    if not repos:
+        raise UsageError("no repos in %s/%s" % (w.project, w.ws or "src"),
+                         hint="tn repo new <name> or tn repo clone <source>")
+    r = pick(repos, label=lambda r: r.name, prompt="repo", what="which repo?")
+    return ctx.for_path(r.path)
+
+
+# == proj ===================================================================================
+
+
+def _toml_str(s: str) -> str:
+    return '"%s"' % s.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _proj_row(cfg, p: ProjectRef) -> dict:
+    forge = identity = None
+    try:
+        pc = cfg.project_config(p.name, p.path)
+        forge, identity = pc.forge, pc.identity
+    except Exception as e:  # noqa: BLE001 - one bad tn.toml must not break the listing
+        out.warn("%s: %s" % (_short(p.path / "tn.toml"), getattr(e, "detail", e)))
+    ws_ids = [_ws_id(w) for w in workspaces(p.path) if w != "src"]
+    return {"name": p.name, "root": p.root_key,
+            "repos": [r.name for r in iter_repos(p.path)],
+            "workspaces": ws_ids, "forge": forge, "identity": identity, "path": str(p.path)}
+
+
+PROJ_COLUMNS = [("name", "PROJECT"), ("root", "ROOT"), ("repos", "REPOS", lambda v: str(len(v))),
+                ("workspaces", "WS"), ("forge", "FORGE"), ("identity", "IDENTITY")]
+
+
+@plugin.command(help="create a project: <root>/<name>/{src,bin,rel,key,tmp}")
+@arg("name", help="project name (lowercase, digits, . _ -)")
+@arg("--root", metavar="KEY", help="the [roots] key (default: projects)")
+@arg("--forge", metavar="F", complete="forge", help="forge key for tn.toml")
+@arg("--group", metavar="G", help="namespace on that forge, for tn.toml")
+@arg("--identity", metavar="P", complete="person", help="people key for tn.toml")
+@arg("--cd", action="store_true", help="change the shell's directory to it")
+def new(ctx, args):
+    cfg = ctx.config
+    name = _check_name(args.name, "project name")
+    key = args.root or "projects"
+    roots = cfg.roots
+    if key not in roots:
+        raise UsageError("unknown root %r" % key, choices=list(roots))
+    if args.forge:
+        cfg.forge(args.forge)
+    if args.identity and cfg.person(args.identity) is None:
+        raise UsageError("unknown person %r" % args.identity,
+                         choices=[p.key for p in cfg.people()])
+    pdir = Path(roots[key]) / name
+    if pdir.exists():
+        raise Fail("%s already exists" % _short(pdir))
+    dirs = cfg.get("proj.dirs")
+    if not isinstance(dirs, list):
+        dirs = DEFAULT_PROJ_DIRS
+    fs.mkdir(pdir)
+    for d in dirs:
+        fs.mkdir(pdir / str(d))
+    conf = {"forge": args.forge, "group": args.group, "identity": args.identity}
+    if any(conf.values()):
+        text = "".join("%s = %s\n" % (k, _toml_str(v)) for k, v in conf.items() if v)
+        fs.write_text(pdir / "tn.toml", text)
+    out.info("Created %s" % _short(pdir))
+    out.hint("add a repo: tn repo new <name> -p %s   or clone one: tn repo clone gh:owner/repo "
+             "-p %s" % (name, name))
+    obj = {"project": name, "root": key, "path": str(pdir), "dirs": [str(d) for d in dirs],
+           "config": conf}
+    out.result(obj)
+    _emit_path(ctx, pdir, args.cd)
+
+
+@plugin.command(name="ls", help="list projects")
+@arg("--root", metavar="KEY", help="only this [roots] key")
+def proj_ls(ctx, args):
+    cfg = ctx.config
+    if args.root and args.root not in cfg.roots:
+        raise UsageError("unknown root %r" % args.root, choices=list(cfg.roots))
+    rows = [_proj_row(cfg, p) for p in iter_projects(cfg, args.root)]
+    _records(ctx, rows, PROJ_COLUMNS, "No projects. Make one with: tn proj new <name>")
+
+
+@plugin.command(name="show", help="one project: its repos, workspaces and tn.toml")
+@arg("project", nargs="?", complete="project", help="default: the Context's project")
+def proj_show(ctx, args):
+    pctx = _project_ctx(ctx, args.project)
+    cfg = pctx.config
+    ref = ProjectRef(pctx.project, pctx.root_key, Path(pctx.root), Path(pctx.project_dir))
+    row = _proj_row(cfg, ref)
+    row["repo_names"] = row["repos"]
+    row["repos"] = _repo_rows(cfg, iter_repos(ref.path), False)
+    pc = cfg.project
+    row["config"] = dict(pc.raw) if pc is not None else {}
+    fields = [("name", "Project"), ("root", "Root"), ("path", "Path"), ("forge", "Forge"),
+              ("identity", "Identity"), ("repo_names", "Repos"), ("workspaces", "Workspaces")]
+    out.record(row, fields)
+
+
+# == repo ===================================================================================
+
+
+def _parse_source(cfg, source: str, project_forge: str | None):
+    """(forge | None, path | None, url | None) for a clone source (§7.1.2)."""
+    s = source.strip()
+    if "://" in s or re.match(r"^[^@/:\s]+@[^:/\s]+:", s):
+        f = cfg.forge_for_url(s)
+        _, path = split_url(s)
+        return f, path, s
+    m = re.match(r"^([A-Za-z0-9_.-]+):(.+)$", s)
+    if m:
+        key, path = m.group(1), m.group(2).strip("/")
+        if path.endswith(".git"):
+            path = path[:-4]
+        if key in (cfg.get("forges") or {}):
+            f = cfg.forge(key)
+            return f, path, None
+        if "." in key:                                  # host:path (scp-style, no user)
+            return cfg.forge_for_url(s), path, s
+        cfg.forge(key)                                  # UsageError with the choices
+    if "/" in s and not s.startswith("/"):
+        if not project_forge:
+            keys = sorted(cfg.get("forges") or {})
+            raise UsageError("say which forge: tn repo clone gh:%s (forges: %s)"
+                             % (s, ", ".join(keys) or "none configured"))
+        path = s.strip("/")
+        if path.endswith(".git"):
+            path = path[:-4]
+        return cfg.forge(project_forge), path, None
+    raise UsageError("cannot clone %r: expected <forge>:<path>, a URL, or owner/repo" % source)
+
+
+def _clone(forge, path: str | None, url: str | None, target: Path) -> str:
+    """Clone into ``target``; returns the URL it cloned from (as best known)."""
+    if url is None and forge is not None and forge.clone == "cli":
+        if forge.cli == "gh":
+            need("gh", "dot apply gh")
+            env = {"GH_HOST": forge.host} if forge.host != "github.com" else None
+            run(["gh", "repo", "clone", path, str(target)], env=env, quiet=True)
+        else:
+            need("glab", "dot apply glab")
+            run(["glab", "repo", "clone", path, str(target)], env={"GITLAB_HOST": forge.host},
+                quiet=True)
+        return forge.url(path)
+    if url is None:
+        url = forge.url(path)
+    need("git", "dot apply git")
+    run(["git", "clone", url, str(target)], quiet=True)
+    return url
+
+
+def _origin_url(ctx: Context, repo: Path, fallback: str) -> str:
+    if ctx.options.dry_run:
+        return fallback
+    remotes = dict(read_remotes(repo))
+    return remotes.get("origin") or (next(iter(remotes.values())) if remotes else fallback)
+
+
+def _committer_note(person: Person | None) -> None:
+    if person is not None:
+        out.info("committer here: %s <%s>" % (person.name, person.email))
+
+
+@plugin.command(name="new", group="repo", help="create a repo in <project>/src and git init it")
+@arg("name", help="repo directory name")
+@arg("-p", "--project", metavar="PROJECT", complete="project", help="default: the Context's")
+@arg("--forge", nargs="?", const="", default=None, metavar="F", complete="forge",
+     help="add the forge's remote (no value: the project's forge)")
+@arg("--cd", action="store_true", help="change the shell's directory to it")
+def repo_new(ctx, args):
+    pctx = _project_ctx(ctx, args.project)
+    name = _check_name(args.name, "repo name", REPO_RE)
+    target = Path(pctx.project_dir) / "src" / name
+    if target.exists():
+        raise Fail("%s already exists" % _short(target))
+    forge_key = None
+    if args.forge is not None:
+        pc = pctx.config.project
+        forge_key = args.forge or (pc.forge if pc is not None else None)
+        if not forge_key:
+            raise UsageError("the project sets no forge: pass --forge <key>",
+                             choices=sorted(pctx.config.get("forges") or {}))
+        pctx.config.forge(forge_key)
+    need("git", "dot apply git")
+    fs.mkdir(target)
+    run(["git", "init", "--quiet", str(target)], quiet=True)
+    rctx = ctx.for_path(target)
+    person = identity_for(rctx)
+    set_identity(target, person)
+    if not (target / ".gitattributes").exists():
+        fs.write_text(target / ".gitattributes", GITATTRIBUTES)
+    remote = None
+    if forge_key:
+        r = add_remote(rctx, forge_key, repo_dir=target)
+        remote = {"name": r["name"], "url": r["url"]}
+    else:
+        out.hint("add a remote: tn git remote add <forge>")
+    out.info("Created %s" % _short(target))
+    _committer_note(person)
+    out.result({"project": pctx.project, "repo": name, "path": str(target),
+                "identity": _identity_json(person), "remote": remote})
+    _emit_path(ctx, target, args.cd)
+
+
+@plugin.command(name="clone", group="repo", help="clone <forge>:<path>, a URL or owner/repo "
+                                                 "into <project>/src")
+@arg("source", help="gh:owner/repo, work:group/sub/repo, a URL, or owner/repo")
+@arg("name", nargs="?", help="local directory name (default: the last path segment)")
+@arg("-p", "--project", metavar="PROJECT", complete="project", help="default: the Context's")
+@arg("--cd", action="store_true", help="change the shell's directory to it")
+def repo_clone(ctx, args):
+    pctx = _project_ctx(ctx, args.project)
+    cfg = pctx.config
+    pc = cfg.project
+    forge, path, url = _parse_source(cfg, args.source, pc.forge if pc is not None else None)
+    default = (path or split_url(url or "")[1] or args.source).rstrip("/").rsplit("/", 1)[-1]
+    default = default.rsplit(":", 1)[-1]
+    if default.endswith(".git"):
+        default = default[:-4]
+    name = args.name
+    if not name:
+        name = ask("local name", default) if can_prompt() else default
+    _check_name(name, "repo name", REPO_RE)
+    src = Path(pctx.project_dir) / "src"
+    target = src / name
+    if target.exists():
+        raise Fail("%s already exists" % _short(target))
+    fs.mkdir(src)
+    out.info("Clone %s\n   -> %s" % (args.source, _short(target)))
+    cloned = _clone(forge, path, url, target)
+    rctx = ctx.for_path(target)
+    person = identity_for(rctx)
+    set_identity(target, person)
+    _committer_note(person)
+    out.result({"project": pctx.project, "repo": name, "path": str(target),
+                "source": args.source, "url": _origin_url(ctx, target, cloned),
+                "forge": forge.key if forge else None, "identity": _identity_json(person)})
+    _emit_path(ctx, target, args.cd)
+
+
+@plugin.command(name="ls", group="repo", help="repos with branch, changes and ahead/behind")
+@arg("project", nargs="?", complete="project", help="default: the Context's project")
+@arg("--ws", metavar="ID", complete="ws", help="this workspace (default: the Context's, or src)")
+@arg("--all-ws", action="store_true", help="every workspace")
+@arg("--all", action="store_true", help="every project in every root")
+@arg("--fetch", action="store_true", help="git fetch every remote first (network)")
+def repo_ls(ctx, args):
+    cfg = ctx.config
+    if args.ws and args.all_ws:
+        raise UsageError("--ws and --all-ws exclude each other")
+    ws = "all" if args.all_ws else (args.ws or None)
+    refs: list = []
+    if args.all and not args.project:
+        for p in iter_projects(cfg):
+            refs.extend(iter_repos(p.path, ws))
+    else:
+        if not args.project and ctx.project is None:
+            raise UsageError("not inside a project; pass a project or --all",
+                             choices=[p.name for p in iter_projects(cfg)] or None)
+        pctx = _project_ctx(ctx, args.project)
+        if ws is None and not args.project and ctx.ws:
+            ws = ctx.ws
+        refs = list(iter_repos(pctx.project_dir, ws))
+    rows = _repo_rows(cfg, refs, args.fetch)
+    cols = list(REPO_COLUMNS)
+    if args.all:
+        cols.insert(0, ("project", "PROJECT"))
+    _records(ctx, rows, cols,
+             "No repos. Add one with: tn repo new <name> or tn repo clone <source>",
+             text=_branch_text)
+
+
+def _repo_extras(repo: Path) -> dict:
+    last = None
+    r = git(repo, "log", "-1", "--format=%H%x1f%aI%x1f%an%x1f%s")
+    if r.returncode == 0 and r.stdout.strip():
+        h, date, author, subject = (r.stdout.rstrip("\n").split("\x1f") + ["", "", "", ""])[:4]
+        ts = clock.parse_iso(date)          # §2.4: UTC with Z, paired with age_seconds
+        last = {"hash": h, "date": clock.iso(ts), "age_seconds": clock.age_seconds(ts),
+                "author": author, "subject": subject}
+    authors = []
+    r = git(repo, "shortlog", "-sne", "HEAD")
+    for line in r.stdout.splitlines() if r.returncode == 0 else []:
+        m = re.match(r"^\s*(\d+)\s+(.*?)\s*<([^>]*)>\s*$", line)
+        if m:
+            authors.append({"name": m.group(2), "email": m.group(3),
+                            "commits": int(m.group(1))})
+    authors = authors[:10]
+    counts: dict = {}
+    markers: dict = {}
+    r = git(repo, "ls-files", "-z")
+    for f in (r.stdout.split("\0") if r.returncode == 0 else []):
+        if not f:
+            continue
+        base = f.rsplit("/", 1)[-1]
+        ext = os.path.splitext(base)[1].lower() or "(none)"
+        counts[ext] = counts.get(ext, 0) + 1
+        key = base if base in MARKERS else ("nginx*" if base.lower().startswith("nginx")
+                                            else None)
+        if key:
+            d = f.rsplit("/", 1)[0] if "/" in f else "."
+            markers.setdefault(key, [])
+            if d not in markers[key]:
+                markers[key].append(d)
+    files = [{"ext": e, "count": c}
+             for e, c in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[:15]]
+    return {"last_commit": last, "authors": authors, "files": files, "markers": markers}
+
+
+@plugin.command(name="show", group="repo", help="one repo: state, last commit, authors, files")
+@arg("repo", nargs="?", complete="target", help="repo, project/repo or a path")
+def repo_show(ctx, args):
+    rctx = _repo_ctx(ctx, args.repo)
+    cfg = rctx.config
+    expected = project_identity(cfg, rctx.project_dir) if rctx.project_dir else None
+    row = repo_state(rctx.repo_dir, cfg=cfg, expected=expected).to_json()
+    row.update(_repo_extras(Path(rctx.repo_dir)))
+    if ctx.options.json:
+        out.json(row)
+        return
+    text = _branch_text(dict(row))
+    lc = row["last_commit"]
+    text["last"] = ("%s %s %s: %s" % (lc["hash"][:7], lc["date"], lc["author"], lc["subject"])
+                    if lc else None)
+    text["authors_t"] = ["%s <%s> %d" % (a["name"], a["email"], a["commits"])
+                         for a in row["authors"]]
+    text["files_t"] = ["%s %d" % (f["ext"], f["count"]) for f in row["files"]]
+    text["markers_t"] = ["%s: %s" % (k, " ".join(v)) for k, v in sorted(row["markers"].items())]
+    text["remotes_t"] = ["%s %s" % (r["name"], r["url"]) for r in row["remotes"]]
+    ident = row["identity"]
+    text["ident_t"] = ("%s <%s>" % (ident.get("name") or "-", ident.get("email") or "-")
+                       if ident else None)
+    join = lambda v: "; ".join(v) if v else "-"  # noqa: E731
+    out.record(text, [("project", "Project"), ("repo", "Repo"), ("ws_id", "Workspace"),
+                      ("path", "Path"), ("branch", "Branch"), ("upstream", "Upstream"),
+                      ("ahead", "Ahead"), ("behind", "Behind"), ("dirty", "Dirty"),
+                      ("remotes_t", "Remotes", join), ("ident_t", "Identity"),
+                      ("identity_ok", "Identity ok"), ("last", "Last commit"),
+                      ("authors_t", "Authors", join), ("files_t", "Files", join),
+                      ("markers_t", "Markers", join)])
+
+
+# == ws =====================================================================================
+
+
+@plugin.command(name="new", group="ws", help="a parallel workspace src-NN of clean clones")
+@arg("id", nargs="?", help="01, src-01 or a word (review); default: the lowest unused src-NN")
+@arg("--cd", action="store_true", help="change the shell's directory to it")
+def ws_new_cmd(ctx, args):
+    ctx.require("project")
+    res = ws_new(ctx.for_path(ctx.project_dir), args.id)
+    out.result(res.to_json())
+    _emit_path(ctx, res.path, args.cd)
+    return 1 if res.failed else 0
+
+
+@plugin.command(name="ls", group="ws", help="workspaces of a project, with dirty/unpushed repos")
+@arg("project", nargs="?", complete="project", help="default: the Context's project")
+def ws_ls(ctx, args):
+    pctx = _project_ctx(ctx, args.project)
+    pdir = Path(pctx.project_dir)
+    sessions = _sessions(ctx)
+    rows = []
+    for w in workspaces(pdir):
+        wdir = pdir / w
+        repos = list(iter_repos(pdir, w))
+        dirty = unpushed = 0
+        for r in repos:
+            st = git(r.path, "status", "--porcelain")
+            if st.returncode != 0 or st.stdout.strip():
+                dirty += 1
+            if ws_blockers(r.path):
+                unpushed += 1
+        try:
+            mtime = wdir.stat().st_mtime
+        except OSError:
+            mtime = None
+        rows.append({"ws_id": _ws_id(w), "ws": w, "repos": [r.name for r in repos],
+                     "dirty_repos": dirty, "unpushed_repos": unpushed,
+                     "sessions": [s.id for s in sessions if s.dir and _under(s.dir, wdir)],
+                     "age_seconds": clock.age_seconds(mtime), "path": str(wdir)})
+    _records(ctx, rows, [("ws_id", "WS"), ("ws", "DIR"), ("repos", "REPOS", lambda v: str(len(v))),
+                    ("dirty_repos", "DIRTY"), ("unpushed_repos", "UNPUSHED"),
+                    ("sessions", "SESSIONS"), ("age_seconds", "AGE", clock.fmt_age)],
+             "No workspaces in %s. Make one with: tn ws new" % pctx.project)
+
+
+# Files a desktop drops into any directory: never work, never a reason to refuse `ws rm`.
+_HARMLESS = frozenset({".DS_Store", "Thumbs.db", "desktop.ini"})
+
+
+@plugin.command(name="rm", group="ws", help="delete a workspace (refuses when work is not pushed)")
+@arg("id", complete="ws", help="01 or src-01 (never src)")
+def ws_rm(ctx, args):
+    name = ws_dir_name(args.id)
+    if name == "src":
+        raise UsageError("src is the original workspace; tn ws rm only removes src-NN")
+    _check_name(name, "workspace", REPO_RE)
+    ctx.require("project")
+    pdir = Path(ctx.project_dir)
+    wdir = pdir / name
+    if not wdir.is_dir():
+        raise UsageError("no workspace %s in %s" % (name, ctx.project),
+                         choices=[w for w in workspaces(pdir) if w != "src"] or None)
+    # Only ever a src-* directory directly inside the project (not through a symlink).
+    real = wdir.resolve()
+    if real.parent != pdir.resolve() or real.name == "src" or not real.name.startswith("src-"):
+        raise UsageError("%s is not a workspace of %s" % (_short(wdir), ctx.project))
+    repos, blocked = [], []
+    for e in sorted(wdir.iterdir(), key=lambda p: p.name):
+        if e.name in _HARMLESS:
+            continue
+        if not e.is_dir() or not _is_repo(e):
+            blocked.append("%s: not a git repository (would be deleted)" % e.name)
+            continue
+        repos.append(e.name)
+        for b in ws_blockers(e):
+            blocked.append("%s: %s" % (e.name, b))
+    if blocked:
+        raise Fail("%s has work that is not pushed; nothing removed" % _short(wdir),
+                   hint="; ".join(blocked))
+    for s in _sessions(ctx):
+        if s.dir and _under(s.dir, wdir):
+            raise Fail("a %s session runs in %s: stop it first: tn %s stop %s"
+                       % (s.kind, _short(wdir), s.kind, s.id))
+    if not confirm("delete %s (%d repo%s)?" % (_short(wdir), len(repos),
+                                               "" if len(repos) == 1 else "s")):
+        raise Cancelled()
+    fs.rmtree(wdir)
+    out.info("Removed %s" % _short(wdir))
+    out.result({"project": ctx.project, "workspace": name, "path": str(wdir),
+                "removed": not ctx.options.dry_run, "repos": repos})
+    if _under(ctx.cwd, wdir):
+        ctx.request_cd(pdir)
+
+
+# == cd =====================================================================================
+
+
+@dataclass
+class _Cand:
+    name: str
+    path: Path
+    kind: str            # project | ws | repo
+    ws: str | None
+    root_key: str
+    secondary: tuple = ()
+
+
+def _cd_candidates(cfg) -> list:
+    cands = []
+    for p in iter_projects(cfg):
+        cands.append(_Cand(p.name, p.path, "project", None, p.root_key))
+        for w in workspaces(p.path):
+            wid = _ws_id(w)
+            if w != "src":
+                cands.append(_Cand("%s@%s" % (p.name, wid), p.path / w, "ws", w, p.root_key))
+            for r in iter_repos(p.path, w):
+                sec = []
+                for _, url in read_remotes(r.path):
+                    _, rp = split_url(url)
+                    if rp:
+                        sec.append(rp)
+                cands.append(_Cand("%s/%s%s" % (p.name, r.name, "" if w == "src" else "@" + wid),
+                                   r.path, "repo", w, p.root_key, tuple(sec)))
+    return cands
+
+
+def _tier(q: str, display: str, last: str) -> int:
+    d, last = display.lower(), last.lower()
+    comps = [c for c in re.split(r"[/@]", d) if c] + [last]
+    if d == q or last == q:
+        return 100
+    if d.startswith(q) or any(c.startswith(q) for c in comps):
+        return 80
+    if q in d:
+        return 60
+    if subsequence(q, d):
+        return 40
+    return 0
+
+
+def _score(q: str, c: _Cand) -> int:
+    best = _tier(q, c.name, c.path.name)
+    for s in c.secondary:
+        best = max(best, _tier(q, s, s.rsplit("/", 1)[-1]) // 2)
+    return best
+
+
+def _same_thing(c: _Cand) -> tuple:
+    """A candidate without its workspace: acme/shop@02 -> (root, acme/shop)."""
+    return (c.root_key, c.kind if c.kind != "ws" else "project", c.name.split("@", 1)[0])
+
+
+@plugin.command(name="", group="cd", help="jump to a project, workspace or repo")
+@arg("query", nargs="*", complete="target", help="words matched against project/repo@ws")
+@arg("--print", action="store_true", help="print the path instead of changing directory")
+def cd_(ctx, args):
+    cfg = ctx.config
+    cands = _cd_candidates(cfg)
+    query = "/".join(args.query).strip().lower()
+    if query:
+        scored = [(c, _score(query, c)) for c in cands]
+        top = max((s for _, s in scored), default=0)
+        if top <= 0:
+            raise Fail('no project, workspace or repo matches "%s"' % " ".join(args.query))
+        best = [c for c, s in scored if s == top]
+        # src over src-NN of the same project or repo; then the shorter path (the picker's order).
+        in_src = {_same_thing(c) for c in best if c.ws in (None, "src")}
+        best = [c for c in best if c.ws in (None, "src") or _same_thing(c) not in in_src]
+    else:
+        best = cands
+        if not best:
+            raise Fail("no projects yet: tn proj new <name>")
+    best.sort(key=lambda c: (c.ws not in (None, "src"), len(str(c.path)), c.name))
+    chosen = best[0] if len(best) == 1 else pick(
+        best, label=lambda c: "%s  %s" % (c.name, _short(c.path)), prompt="cd",
+        what="which one?")
+    if ctx.options.json:
+        out.json({"name": chosen.name, "path": str(chosen.path), "kind": chosen.kind})
+        return
+    if args.print:
+        out.line(str(chosen.path))
+        return
+    ctx.request_cd(chosen.path)
+
+
+# == completers, status, checks =============================================================
+
+
+@plugin.completer("project")
+def _c_project(ctx, prefix):
+    return sorted({p.name for p in iter_projects(ctx.config)})
+
+
+@plugin.completer("repo")
+def _c_repo(ctx, prefix):
+    if ctx.project_dir is not None:
+        return [r.name for r in iter_repos(ctx.project_dir, ctx.ws or "src")]
+    return sorted({"%s/%s" % (p.name, r.name) for p in iter_projects(ctx.config)
+                   for r in iter_repos(p.path)})
+
+
+@plugin.completer("ws")
+def _c_ws(ctx, prefix):
+    if ctx.project_dir is None:
+        return []
+    return [(_ws_id(w), w) for w in workspaces(ctx.project_dir)]
+
+
+@plugin.completer("target")
+def _c_target(ctx, prefix):
+    items = set()
+    for p in iter_projects(ctx.config):
+        items.add(p.name)
+        for w in workspaces(p.path):
+            suffix = "" if w == "src" else "@" + (_ws_id(w) or w)
+            if suffix:
+                items.add(p.name + suffix)
+            for r in iter_repos(p.path, w):
+                items.add("%s/%s%s" % (p.name, r.name, suffix))
+    return sorted(items)
+
+
+@plugin.status
+def _status(ctx):
+    if ctx.project_dir is None:
+        return None
+    ws = workspaces(ctx.project_dir)
+    n = len(list(iter_repos(ctx.project_dir, ctx.ws or "src")))
+    return "%s, %d repo%s, workspaces %s" % (ctx.name, n, "" if n == 1 else "s",
+                                             " ".join(_ws_id(w) or w for w in ws) or "-")
+
+
+@plugin.check
+def _roots_exist(ctx):
+    """project roots exist"""
+    missing = [(k, p) for k, p in ctx.config.roots.items() if not Path(p).is_dir()]
+    if missing:
+        k, p = missing[0]
+        raise Problem("root %s (%s) does not exist" % (k, _short(p)),
+                      fix="mkdir -p %s" % _short(p), level="warn")
+    return ", ".join(_short(p) for p in ctx.config.roots.values())
+
+
+@plugin.check
+def _git_installed(ctx):
+    """git installed"""
+    need("git", "dot apply git")

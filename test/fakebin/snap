@@ -1,0 +1,16 @@
+#!/bin/sh
+# Fake snap: `install [--classic] <names>` records names in $FAKE_STATE/snap; `list` prints them as
+# snap's table; `refresh --list` has nothing newer. Pair with DOT_SNAPD=1 (sandbox.sh's default).
+echo "snap $*" >> "$FAKE_LOG"
+db="$FAKE_STATE/snap"
+case "$1" in
+  list)
+    echo "Name  Version  Rev  Tracking  Publisher  Notes"
+    [ -f "$db" ] && while read -r n; do echo "$n  1.0  1  latest/stable  fake  -"; done < "$db"
+    exit 0 ;;
+  install)
+    shift
+    for a in "$@"; do case "$a" in -*) ;; *) grep -qxF "$a" "$db" 2>/dev/null || echo "$a" >> "$db" ;; esac; done ;;
+  refresh) [ "$2" = --list ] && echo "All snaps up to date." ;;
+esac
+exit 0

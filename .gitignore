@@ -1,0 +1,27 @@
+# Machine-local values and anything that could hold a secret. The private copy of the envfile
+# secrets is kept in bundles/common/secrets (committed to this private repository, below).
+.env.local
+.env.*.local
+*.local.env
+*.secret.env
+secrets.env
+*.secret
+*.ovpn
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
+*.age
+
+# Editors and OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*~
+
+# Python bytecode: each file embeds the absolute source path (a home directory and user name)
+__pycache__/
+*.py[cod]

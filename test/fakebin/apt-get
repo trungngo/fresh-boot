@@ -1,0 +1,15 @@
+#!/bin/sh
+# Fake apt-get: `install` records package names in $FAKE_STATE/apt.
+echo "apt-get $*" >> "$FAKE_LOG"
+case "$1" in
+  update) exit 0 ;;
+  install)
+    shift; skip=0
+    for a in "$@"; do
+      if [ $skip = 1 ]; then skip=0; continue; fi
+      # A package file (`./x.deb`, `<name>_<version>_<arch>.deb` from download / github_release)
+      # records the part of its file name before the first `_` as the package name.
+      case "$a" in -o) skip=1 ;; -*) ;; *.deb) basename "$a" .deb | cut -d_ -f1 >> "$FAKE_STATE/apt" ;; *) echo "$a" >> "$FAKE_STATE/apt" ;; esac
+    done ;;
+esac
+exit 0

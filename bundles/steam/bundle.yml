@@ -1,0 +1,13 @@
+# yaml-language-server: $schema=https://github.com/trungngo/dot-cli/releases/latest/download/bundle.schema.json
+#
+# Steam, Valve's game store and launcher: winget on Windows. Windows only (for now) and opt-in:
+# no profile selects it (`dot apply steam`). See README.md.
+name: steam
+description: Steam game launcher (Windows, opt-in)
+requires: [common]
+when: { os: windows, role: desktop }
+
+steps:
+  - label: Install Steam
+    package:
+      winget: [Valve.Steam]

@@ -1,0 +1,50 @@
+# yaml-language-server: $schema=https://github.com/trungngo/dot-cli/releases/latest/download/bundle.schema.json
+#
+# Google Chrome. Linux: Google's own .deb, which then adds Google's apt repository itself, so
+# apt keeps it current; macOS the cask, Windows winget. Nothing is linked: Chrome syncs its own
+# settings with your Google account. See README.md.
+name: chrome
+description: Google Chrome
+requires: [common]
+when: { role: desktop }
+
+steps:
+  # Google builds Chrome for Linux on amd64 only. The .deb's install script writes
+  # /etc/apt/sources.list.d/google-chrome.list and Google's signing key, and a daily job keeps
+  # them there, so updates come with `apt upgrade`. dot adds no repository of its own: a second
+  # entry for the same repository with another Signed-By would make apt refuse every source
+  # (what happened with Claude Desktop). Once installed, this step is satisfied.
+  - label: Install Google Chrome (.deb from Google)
+    when: { os: linux, family: debian, arch: x86_64 }
+    download:
+      url: https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+      package: google-chrome-stable
+
+  - label: Install Google Chrome
+    when: { os: [macos, windows] }
+    package:
+      cask: [google-chrome]
+      winget: [Google.Chrome]
+
+  # Chrome as the default browser. Windows protects the http/https choice (UserChoice carries a
+  # hash only the Settings app may write), so nothing can set it silently: Chrome's own
+  # --make-default-browser opens Settings > Default apps on Chrome's page, where one click on
+  # "Set default" finishes it. The check reads the choice Windows keeps (UserChoiceLatest on
+  # current builds, UserChoice before): until it is Chrome's ChromeHTML ProgId for both schemes,
+  # each run opens that page again.
+  - label: Chrome is the default browser (Windows)
+    when: { os: windows }
+    shell:
+      cmd: |
+        Start-Process chrome -ArgumentList '--make-default-browser'
+        Write-Output 'Settings is open on Google Chrome: click "Set default" there.'
+      unless: |
+        $base = 'HKCU:\Software\Microsoft\Windows\Shell\Associations\UrlAssociations'
+        foreach ($s in 'http', 'https') {
+          $id = $null
+          foreach ($k in 'UserChoiceLatest', 'UserChoice') {
+            if (-not $id) { $id = (Get-ItemProperty -LiteralPath "$base\$s\$k" -ErrorAction SilentlyContinue).ProgId }
+          }
+          if ($id -notlike 'ChromeHTML*') { exit 1 }
+        }
+        exit 0

@@ -1,0 +1,51 @@
+# yaml-language-server: $schema=https://github.com/trungngo/dot-cli/releases/latest/download/bundle.schema.json
+#
+# The Go toolchain (opt-in: `dot apply go`). macOS: Homebrew's `go`. Windows: winget `GoLang.Go`
+# (the official MSI). Linux: the official tarball at the version go.dev says is current, as the
+# tree /usr/local/go. See README.md.
+name: go
+description: Go toolchain (opt-in)
+requires: [common]
+provides: [go]
+when: { os: [linux, macos, windows] }
+
+vars:
+  go_root:
+    type: path
+    default: /usr/local/go
+    description: Where the Go tree goes on Linux (GOROOT); go.dev's documented location
+  # go.dev's architecture names; an architecture missing here fails the plan rather than
+  # downloading the wrong build.
+  goarch: '{{ {"x86_64": "amd64", "aarch64": "arm64"}[arch] }}'
+
+steps:
+  - label: Go (Homebrew / winget)
+    when: { os: [macos, windows] }
+    package:
+      brew: [go]
+      winget: [GoLang.Go]
+
+  # `latest:` answers two lines (version, then a timestamp); the first is `go1.N.M`. The
+  # tarball is checked against the SHA-256 go.dev publishes next to it (`sha256_url`).
+  # replace: the tree is swapped whole on an update, as go.dev requires (extracting over an
+  # old tree leaves stale files; the old script's `rm -rf` first). The tree is root-owned.
+  - label: Go (latest from go.dev)
+    when: { os: linux }
+    download:
+      latest: https://go.dev/VERSION?m=text
+      url: "https://go.dev/dl/{latest}.linux-{{ goarch }}.tar.gz"
+      sha256_url: "https://dl.google.com/go/{latest}.linux-{{ goarch }}.tar.gz.sha256"
+      dest: "{{ go_root }}"
+      extract: tar.gz
+      strip: 1
+      replace: true
+      root: true
+
+  - label: Go on PATH
+    when: { os: linux }
+    path: ["{{ go_root }}/bin"]
+
+  # Where `go install` puts programs (GOPATH defaults to ~/go on every OS, %USERPROFILE%\go on
+  # Windows).
+  - label: go install's bin on PATH
+    path: [~/go/bin]

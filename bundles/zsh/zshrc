@@ -1,0 +1,206 @@
+# ~/.zshrc -> bundles/zsh/zshrc in this repository, linked by `dot` (zsh bundle).
+#
+# Nothing but the zsh bundle writes here, and no installer may append to it: this file is a
+# symlink into git. Where things go instead (CLAUDE.md, "Shell integration"):
+#
+#   PATH, environment         a `path:` / `env:` step in the tool's bundle; arrives below through
+#                             `dot env --shell zsh`, with every non-secret repo variable (MY_NAME,
+#                             MY_EMAIL, MY_MACHINE, MYPROJECTS_DIR, ...). Never a secret.
+#   eval/init, completions,   bundles/<name>/<name>.zsh, linked to ~/.config/zsh/conf.d/<name>.zsh
+#   aliases, functions        and sourced below in name order, every line guarded (`command -v`).
+#   this machine only         ~/.local.zshrc: untracked, sourced last, so it wins.
+#
+# No oh-my-zsh: sections 2-4 do what its lib/ and the git, tmux, docker and kubectl plugins did.
+#
+# Order: 1. dot env  2. options, history  3. keys  4. completion  5. aliases, functions
+#        6. prompt  7. conf.d/*.zsh  8. plugins  9. ~/.local.zshrc
+
+# --- 1. PATH and environment from dot -------------------------------------------------------
+#
+# Cached, so a shell start does not regenerate it: `dot env --shell zsh --cache` keeps the
+# output in ~/.cache/dot/env.zsh, writes it again only when
+# something it is made from changed (dot's state, ~/.config/dot/local.env, the repository's
+# dot.yml / .env*, or the dot binary), and prints the file's path.
+
+typeset -U path PATH fpath
+# ~/bin: the conventional home for one-off local binaries, kept from the old zshrc; only when it
+# exists (a `path:` step would add it unconditionally). Before ~/.local/bin is prepended, so
+# what dot installs there (devtunnel, starship, ...) wins over a stale copy in ~/bin.
+[[ -d $HOME/bin ]] && path=("$HOME/bin" $path)
+path=("$HOME/.local/bin" $path)     # where install.sh puts dot itself
+
+if command -v dot >/dev/null; then
+    _dot_env=$(dot env --shell zsh --cache 2>/dev/null) && [[ -r $_dot_env ]] && source "$_dot_env"
+    unset _dot_env
+fi
+
+_zsh_cache=${XDG_CACHE_HOME:-$HOME/.cache}/zsh
+[[ -d $_zsh_cache ]] || mkdir -p "$_zsh_cache"
+
+# --- 2. zsh options and history -------------------------------------------------------------
+
+# https://blog.vghaisas.com/zsh-beep-sound/ - turn off all beeps
+unsetopt BEEP
+
+setopt interactive_comments     # `# ...` on the command line is a comment
+setopt auto_cd                  # a bare directory name cd's into it
+setopt auto_pushd pushd_ignore_dups pushd_minus   # `cd -<Tab>`, `d` below lists the stack
+setopt long_list_jobs
+
+HISTFILE=${HISTFILE:-$HOME/.zsh_history}
+HISTSIZE=50000
+SAVEHIST=10000
+setopt extended_history         # timestamps in HISTFILE
+setopt hist_expire_dups_first   # trim duplicates first when HISTSIZE is reached
+setopt hist_ignore_dups         # no consecutive duplicates
+setopt hist_ignore_space        # ` cmd` stays out of history
+setopt hist_verify              # `!!` expands onto the line instead of running
+setopt share_history            # every shell sees the others' commands
+
+# --- 3. keys --------------------------------------------------------------------------------
+#
+# Emacs keymap, as oh-my-zsh set it: zsh would otherwise pick vi mode because EDITOR is vim.
+
+bindkey -e
+
+# terminfo key codes are only valid in application mode.
+if (( ${+terminfo[smkx]} && ${+terminfo[rmkx]} )); then
+    zle-line-init() { echoti smkx }
+    zle-line-finish() { echoti rmkx }
+    zle -N zle-line-init
+    zle -N zle-line-finish
+fi
+
+# Up / Down: history entries starting with what is typed so far.
+autoload -Uz up-line-or-beginning-search down-line-or-beginning-search
+zle -N up-line-or-beginning-search
+zle -N down-line-or-beginning-search
+bindkey '^[[A' up-line-or-beginning-search
+bindkey '^[[B' down-line-or-beginning-search
+[[ -n ${terminfo[kcuu1]} ]] && bindkey "${terminfo[kcuu1]}" up-line-or-beginning-search
+[[ -n ${terminfo[kcud1]} ]] && bindkey "${terminfo[kcud1]}" down-line-or-beginning-search
+
+[[ -n ${terminfo[khome]} ]] && bindkey "${terminfo[khome]}" beginning-of-line
+[[ -n ${terminfo[kend]} ]]  && bindkey "${terminfo[kend]}"  end-of-line
+[[ -n ${terminfo[kcbt]} ]]  && bindkey "${terminfo[kcbt]}"  reverse-menu-complete   # Shift-Tab
+[[ -n ${terminfo[kdch1]} ]] && bindkey "${terminfo[kdch1]}" delete-char
+bindkey '^[[3~' delete-char
+bindkey '^?' backward-delete-char
+bindkey '^[[1;5C' forward-word        # Ctrl-Right
+bindkey '^[[1;5D' backward-word       # Ctrl-Left
+bindkey '^[[3;5~' kill-word           # Ctrl-Delete
+bindkey '^r' history-incremental-search-backward
+bindkey ' ' magic-space               # `!!` / `!$` expand on space
+
+# Ctrl-X Ctrl-E: edit the command line in $EDITOR.
+autoload -Uz edit-command-line
+zle -N edit-command-line
+bindkey '^x^e' edit-command-line
+
+# --- 4. completion --------------------------------------------------------------------------
+#
+# Completions come from the tools: zsh ships git's (and many more), Homebrew and apt packages
+# put theirs in site-functions / vendor-completions (already on fpath for their own zsh), and a
+# bundle's conf.d file evals `<tool> completion zsh` (gh, glab). compinit runs here, before
+# conf.d, so those files can call compdef.
+
+[[ -n ${HOMEBREW_PREFIX:-} && -d $HOMEBREW_PREFIX/share/zsh/site-functions ]] \
+    && fpath=("$HOMEBREW_PREFIX/share/zsh/site-functions" $fpath)
+
+autoload -Uz compinit
+# -i: skip (not prompt about) group-writable directories, which Homebrew's often are.
+compinit -i -d "$_zsh_cache/zcompdump-$ZSH_VERSION"
+
+zmodload -i zsh/complist
+setopt complete_in_word always_to_end
+unsetopt menu_complete flow_control
+setopt auto_menu
+zstyle ':completion:*' menu select
+zstyle ':completion:*' matcher-list 'm:{[:lower:][:upper:]}={[:upper:][:lower:]}' 'r:|=*' 'l:|=* r:|=*'
+zstyle ':completion:*' special-dirs true
+zstyle ':completion:*' list-colors ''
+zstyle ':completion:*' use-cache yes
+zstyle ':completion:*' cache-path "$_zsh_cache/compcache"
+zstyle ':completion:*:*:kill:*:processes' list-colors '=(#b) #([0-9]#) ([0-9a-z-]#)*=01;34=0=01'
+
+# Tools with no bundle of their own (docker is opt-in, kubectl comes from anywhere); both
+# print their own completion, which is what oh-my-zsh's plugins sourced.
+command -v docker >/dev/null && source <(docker completion zsh 2>/dev/null)
+command -v kubectl >/dev/null && source <(kubectl completion zsh 2>/dev/null)
+
+# --- 5. aliases and functions ---------------------------------------------------------------
+
+# Colours for ls and grep (BSD ls on macOS, GNU on Linux).
+if ls --color=auto -d . >/dev/null 2>&1; then
+    alias ls='ls --color=auto'
+else
+    export CLICOLOR=1
+fi
+alias grep='grep --color=auto'
+alias l='ls -lah' ll='ls -lh' la='ls -lAh'
+alias ...='../..' ....='../../..'
+alias d='dirs -v | head -10'
+alias md='mkdir -p'
+
+# The everyday ones of oh-my-zsh's git plugin; `alias | grep git` lists them.
+alias g=git
+alias ga='git add' gaa='git add --all' gapa='git add --patch'
+alias gb='git branch' gba='git branch --all'
+alias gc='git commit --verbose' gcmsg='git commit --message'
+alias gco='git checkout' gcb='git checkout -b' gsw='git switch' gswc='git switch --create'
+alias gd='git diff' gds='git diff --staged'
+alias gf='git fetch' gl='git pull' gp='git push'
+alias glog='git log --oneline --decorate --graph' gloga='git log --oneline --decorate --graph --all'
+alias grb='git rebase' grbi='git rebase --interactive'
+alias gst='git status' gss='git status --short'
+alias gsta='git stash push' gstp='git stash pop'
+
+# oh-my-zsh's tmux and kubectl plugins.
+alias ta='tmux attach -t' tl='tmux list-sessions' ts='tmux new-session -s' tkss='tmux kill-session -t'
+command -v kubectl >/dev/null && alias k=kubectl
+
+# Replace this shell with a fresh login shell: picks up a changed zshrc, conf.d file or
+# `dot env`. A function, because a script cannot replace the shell that runs it.
+reload() {
+    exec "${SHELL:-zsh}" -l
+}
+
+# --- 6. prompt ------------------------------------------------------------------------------
+#
+# starship (zsh bundle: github_release on Linux, brew on macOS), default config. Until it is
+# installed, a plain prompt close to oh-my-zsh's robbyrussell.
+
+if command -v starship >/dev/null; then
+    eval "$(starship init zsh)"
+else
+    PROMPT='%(?:%F{green}➜:%F{red}➜) %F{cyan}%1~%f '
+fi
+
+# --- 7. per-bundle integrations -------------------------------------------------------------
+#
+# (N-.): no error when the directory is empty, and a link left dangling by a renamed bundle file
+# is skipped (the zsh bundle's `clean` step removes it on the next apply).
+
+for _conf in "$HOME"/.config/zsh/conf.d/*.zsh(N-.); do
+    source "$_conf"
+done
+unset _conf
+
+# --- 8. plugins -----------------------------------------------------------------------------
+#
+# From apt (/usr/share/<name>) or Homebrew ($HOMEBREW_PREFIX/share/<name>). Syntax highlighting
+# wraps every widget defined so far, so it comes after conf.d; ~/.local.zshrc still wins.
+
+for _plugin in zsh-autosuggestions zsh-syntax-highlighting; do
+    for _dir in ${HOMEBREW_PREFIX:+$HOMEBREW_PREFIX/share} /usr/share; do
+        if [[ -r $_dir/$_plugin/$_plugin.zsh ]]; then
+            source "$_dir/$_plugin/$_plugin.zsh"
+            break
+        fi
+    done
+done
+unset _plugin _dir _zsh_cache
+
+# --- 9. this machine ------------------------------------------------------------------------
+
+[[ -r ~/.local.zshrc ]] && source ~/.local.zshrc

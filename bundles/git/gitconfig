@@ -1,0 +1,33 @@
+# ~/.gitconfig, rendered by dot from bundles/git/gitconfig in the dotfiles repository.
+# The next `dot apply` overwrites edits made here (`git config --global ...` included): change
+# the template, or keep machine-local settings in ~/.gitconfig.local
+# (`git config --file ~/.gitconfig.local <key> <value>`), included at the end.
+[core]
+	excludesfile = ~/.gitignore_global
+	editor = vim
+
+[user]
+	name = {{ MY_NAME }}
+	email = {{ MY_EMAIL }}
+
+# `git pull` rebases local commits onto the remote instead of asking (or merging).
+[pull]
+	rebase = true
+
+# https credentials come from the CLIs' own logins (system keyring), never from a file here.
+# The empty `helper =` first clears any helper set earlier (Git for Windows' system-wide
+# `manager`, osxkeychain), so only the CLI answers for these hosts. Bare names, no absolute
+# path: gh / glab resolve through PATH on every OS (/usr/bin on Linux, Homebrew on macOS).
+[credential "https://github.com"]
+	helper =
+	helper = !gh auth git-credential
+[credential "https://gist.github.com"]
+	helper =
+	helper = !gh auth git-credential
+[credential "https://gitlab.com"]
+	helper =
+	helper = !glab auth git-credential
+
+# Last, so machine-local settings win. A missing file is ignored by git; dot creates it empty.
+[include]
+	path = ~/.gitconfig.local

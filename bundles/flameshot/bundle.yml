@@ -1,0 +1,111 @@
+# yaml-language-server: $schema=https://github.com/trungngo/dot-cli/releases/latest/download/bundle.schema.json
+#
+# Flameshot, the screenshot tool, on the Print key: a GNOME custom shortcut on Ubuntu; on Windows
+# Flameshot's own Print hotkey, with Flameshot started at sign-in. macOS uses its built-in capture
+# (Cmd+Shift+5) instead, so the bundle is Linux and Windows only. See README.md.
+name: flameshot
+description: Flameshot screenshots on the Print key (Linux and Windows desktops)
+requires: [common]
+when: { os: [linux, windows], role: desktop }
+
+steps:
+  - label: Install Flameshot
+    package:
+      apt: [flameshot]
+      winget: [Flameshot.Flameshot]
+
+  # Windows 11 opens the Snipping Tool on Print (on by default since 2023), which grabs the key
+  # before Flameshot's own hotkey. The setting is Settings > Accessibility > Keyboard >
+  # "Use the Print screen key to open screen capture"; it takes effect after signing in again.
+  - label: Leave the Print key to Flameshot (Windows)
+    when: { os: windows }
+    shell:
+      cmd: Set-ItemProperty -LiteralPath 'HKCU:\Control Panel\Keyboard' -Name PrintScreenKeyForSnippingEnabled -Type DWord -Value 0
+      unless: |
+        if ((Get-ItemProperty -LiteralPath 'HKCU:\Control Panel\Keyboard' -ErrorAction SilentlyContinue).PrintScreenKeyForSnippingEnabled -eq 0) { exit 0 } else { exit 1 }
+
+  # On Windows Flameshot always registers Print itself (src/core/globalshortcutfilter.cpp, besides
+  # the configurable TAKE_SCREENSHOT, default Win+Shift+X), but only while it runs in the tray. So
+  # it is started at sign-in: startupLaunch=true in [General] of %APPDATA%\flameshot\flameshot.ini
+  # (its QSettings file; other keys are kept) and the HKCU Run value "Flameshot" that its own
+  # "Launch at startup" checkbox writes. A running Flameshot is restarted (it reads them at
+  # start); one that is not running is started. OneDrive's screenshot option also takes Print and
+  # cannot be set from here: README.md.
+  - label: Flameshot started at sign-in (Windows)
+    when: { os: windows }
+    shell:
+      prelude: |
+        $ini = "{{ appdata }}\flameshot\flameshot.ini"
+        $exe = "$env:ProgramFiles\Flameshot\bin\flameshot.exe"
+        $run = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+        function Get-IniValue([string]$section, [string]$key) {
+          $in = $false
+          foreach ($line in @(if (Test-Path -LiteralPath $ini) { Get-Content -LiteralPath $ini })) {
+            if ($line -match '^\s*\[(.+)\]\s*$') { $in = ($Matches[1] -eq $section); continue }
+            if ($in -and $line -match "^\s*$([regex]::Escape($key))\s*=(.*)$") { return $Matches[1].Trim() }
+          }
+        }
+        function Set-IniValue([string]$section, [string]$key, [string]$value) {
+          $lines = [System.Collections.Generic.List[string]]@(if (Test-Path -LiteralPath $ini) { Get-Content -LiteralPath $ini })
+          $start = -1; $end = $lines.Count
+          for ($i = 0; $i -lt $lines.Count; $i++) {
+            if ($lines[$i] -match '^\s*\[(.+)\]\s*$') {
+              if ($start -ge 0) { $end = $i; break }
+              if ($Matches[1] -eq $section) { $start = $i }
+            }
+          }
+          if ($start -lt 0) {
+            if ($lines.Count -gt 0 -and $lines[$lines.Count - 1] -ne '') { $lines.Add('') }
+            $lines.Add("[$section]"); $lines.Add("$key=$value")
+          } else {
+            $found = $false
+            for ($i = $start + 1; $i -lt $end; $i++) {
+              if ($lines[$i] -match "^\s*$([regex]::Escape($key))\s*=") { $lines[$i] = "$key=$value"; $found = $true; break }
+            }
+            if (-not $found) {
+              $at = $end; while ($at -gt $start + 1 -and $lines[$at - 1] -eq '') { $at-- }
+              $lines.Insert($at, "$key=$value")
+            }
+          }
+          New-Item -ItemType Directory -Force -Path (Split-Path $ini) | Out-Null
+          Set-Content -LiteralPath $ini -Value $lines -Encoding utf8NoBOM
+        }
+      cmd: |
+        if (-not (Test-Path -LiteralPath $exe)) { throw "Flameshot is not at $exe" }
+        Get-Process flameshot -ErrorAction SilentlyContinue | Stop-Process -Force
+        Set-IniValue 'General' 'startupLaunch' 'true'
+        Set-ItemProperty -LiteralPath $run -Name Flameshot -Value $exe
+        Start-Process -FilePath $exe
+      unless: |
+        if ((Get-IniValue 'General' 'startupLaunch') -ne 'true') { exit 1 }
+        if ((Get-ItemProperty -LiteralPath $run -ErrorAction SilentlyContinue).Flameshot -ne $exe) { exit 1 }
+        if (-not (Get-Process flameshot -ErrorAction SilentlyContinue)) { exit 1 }
+        exit 0
+
+  # dot has no gsettings directive. GNOME's own screenshot UI holds Print, and the shell grabs it
+  # before any custom shortcut, so it is unbound (Shift+Print / Alt+Print keep GNOME's full-screen
+  # and window shots); then a custom shortcut binds Print to `flameshot gui`, appended to the
+  # existing custom shortcuts. Skipped on a desktop without GNOME Shell.
+  - label: Bind Print to Flameshot
+    when: { os: linux }
+    only_if: gsettings list-keys org.gnome.shell.keybindings
+    shell:
+      prelude: |
+        k=org.gnome.settings-daemon.plugins.media-keys
+        p=/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/flameshot/
+      cmd: |
+        gsettings set org.gnome.shell.keybindings show-screenshot-ui "[]" &&
+        gsettings set "$k.custom-keybinding:$p" name "'Flameshot'" &&
+        gsettings set "$k.custom-keybinding:$p" command "'flameshot gui'" &&
+        gsettings set "$k.custom-keybinding:$p" binding "'Print'" &&
+        cur=$(gsettings get $k custom-keybindings) &&
+        case "$cur" in
+          *"'$p'"*) ;;
+          *"[]") gsettings set $k custom-keybindings "['$p']" ;;
+          *) gsettings set $k custom-keybindings "${cur%]}, '$p']" ;;
+        esac
+      unless: |
+        ! gsettings get org.gnome.shell.keybindings show-screenshot-ui | grep -qF "'Print'" &&
+        gsettings get $k custom-keybindings | grep -qF "'$p'" &&
+        [ "$(gsettings get "$k.custom-keybinding:$p" command)" = "'flameshot gui'" ] &&
+        [ "$(gsettings get "$k.custom-keybinding:$p" binding)" = "'Print'" ]

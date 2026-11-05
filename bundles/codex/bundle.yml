@@ -1,0 +1,60 @@
+# yaml-language-server: $schema=https://github.com/trungngo/dot-cli/releases/latest/download/bundle.schema.json
+#
+# Codex CLI (OpenAI's terminal coding agent) on Linux and macOS, from its latest GitHub release,
+# plus the Codex desktop app on macOS (OpenAI publishes no Linux app). Why and gotchas: README.md.
+name: codex
+description: Codex CLI (latest release), and the Codex desktop app on macOS
+requires: [common, tn, projects]
+when: { os: [linux, macos] }
+
+steps:
+  # Machines set up by the old repo ran the official install.sh, which left ~/.local/bin/codex
+  # as a link into ~/.codex/packages/standalone/releases/<version>/bin. github_release refuses
+  # to install over an executable it did not install, so retire that link first (only a link
+  # into ~/.codex/packages; no backup of it is kept). The installer's tree under
+  # ~/.codex/packages is left alone: README.md "Migrating from the official installer".
+  - label: Retire the official installer's codex link
+    absent:
+      ~/.local/bin/codex: { pointing_into: ~/.codex/packages }
+
+  # The plain CLI tarball of openai/codex's latest release: one executable named after its
+  # target triple (codex-x86_64-unknown-linux-musl, ...), installed as ~/.local/bin/codex (on
+  # PATH via common). Linux takes the static musl build (the only Linux build published). No
+  # installer script runs, so nothing can append its PATH block to ~/.zshrc. The release also
+  # carries codex-package-*, codex-app-server-*, codex-npm-*, bwrap-* and .zst / .dmg / .sigstore
+  # variants of every asset: the mapping names the one to take.
+  - label: Install Codex CLI (latest release)
+    github_release:
+      repo: openai/codex
+      asset:
+        linux/x86_64: codex-x86_64-unknown-linux-musl.tar.gz
+        linux/aarch64: codex-aarch64-unknown-linux-musl.tar.gz
+        macos/aarch64: codex-aarch64-apple-darwin.tar.gz
+        macos/x86_64: codex-x86_64-apple-darwin.tar.gz
+      bin: { codex: "codex-*" }
+      # `dot plan` judges each step against the machine as it is, so it would still see the
+      # installer's link the step above removes, report a conflict and exit 1. With replace it
+      # plans a replace instead, and at apply time nothing is left to back up. Any other codex
+      # found here (neither dot's nor the installer's) is kept as codex.dot-backup.
+      replace: true
+
+  # What the official installer's package bundles beside the binary and the plain tarball
+  # lacks: ripgrep (the package puts its own `rg` on the PATH of the commands Codex runs, which
+  # reach for it first) and, on Linux, bubblewrap (the sandbox falls back to `bwrap` on PATH
+  # when no bundled copy sits beside the executable, and warns when there is none).
+  - label: Codex runtime helpers (ripgrep, bubblewrap)
+    package:
+      apt: [ripgrep, bubblewrap]
+      brew: [ripgrep]
+
+  - label: Install Codex desktop
+    when: { os: macos }
+    package:
+      cask: [codex-app]
+
+  # `tn codex start|ls|attach|stop|login` (docs/tn.md §7.3; replaces the codex-* scripts).
+  # Copied, never linked (as every tn plugin): the command keeps working while this checkout
+  # moves or is mid-edit. tests/ is never copied.
+  - label: Copy the tn plugin
+    copy:
+      ~/.local/share/tn/plugins/codex.py: plugin.py

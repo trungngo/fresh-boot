@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Ghidra
+Comment=Software reverse engineering suite
+Exec={{ home }}/.local/share/ghidra/ghidraRun
+Icon={{ home }}/.local/share/ghidra/support/ghidra.ico
+Terminal=false
+Categories=Development;Debugger;

@@ -1,0 +1,40 @@
+# yaml-language-server: $schema=https://github.com/trungngo/dot-cli/releases/latest/download/bundle.schema.json
+#
+# bb (https://getbb.app): an IDE that can control and customize itself. Desktops only. Linux
+# takes the AppImage from the latest GitHub release of get-bb/bb, macOS its disk image into
+# ~/Applications. Upstream publishes nothing else (no Intel Mac, no Linux arm64, and Windows
+# only through WSL). Nothing is linked: bb keeps only generated settings. See README.md.
+name: bb
+description: bb, the self-customizing IDE (Linux x86_64 and Apple Silicon)
+requires: [common]
+when: { role: desktop, os: [linux, macos] }
+
+steps:
+  # Asset: bb-<version>-x86_64.AppImage. Saved whole (executable), not unpacked; the desktop
+  # entry runs it with --appimage-extract-and-run so it needs no FUSE (libfuse2), which Ubuntu
+  # 24.04 does not install. A new release replaces the file on the next apply.
+  - label: Install bb (AppImage from the latest release)
+    when: { os: linux, arch: x86_64 }
+    download:
+      release:
+        repo: get-bb/bb
+        asset:
+          linux/x86_64: "bb-*-x86_64.AppImage"
+      dest: ~/.local/share/bb/bb.AppImage
+      mode: "0755"
+
+  # Desktop entries do not expand `~`, so Exec= takes the absolute home.
+  - label: bb desktop entry
+    when: { os: linux, arch: x86_64 }
+    template:
+      ~/.local/share/applications/bb.desktop: bb.desktop
+
+  # No Homebrew cask. ~/Applications, not /Applications: user-owned, so no sudo, and macOS's
+  # App Management protection (which blocks ssh sessions from changing /Applications) is not
+  # involved. install-mac.sh runs in this bundle's directory.
+  - label: Install bb (macOS disk image)
+    when: { os: macos, arch: aarch64 }
+    shell:
+      cmd: sh install-mac.sh
+      unless: test -d "$HOME/Applications/bb.app"
+      upgrade: sh install-mac.sh

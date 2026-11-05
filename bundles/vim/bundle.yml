@@ -1,0 +1,45 @@
+# yaml-language-server: $schema=https://github.com/trungngo/dot-cli/releases/latest/download/bundle.schema.json
+#
+# Plain vim, the vimrc family and ideavimrc. No plugin manager and no plugins: the vimrc uses
+# only what ships with Vim (see README.md).
+name: vim
+description: plain vim and the vimrc family (plus ideavimrc)
+requires: [common]
+
+steps:
+  # common installs vim too (it is a baseline tool); saying it here keeps this bundle whole when
+  # applied alone, and gives Windows vim.vim (dot.yml package map).
+  - label: Install vim
+    package: [vim]
+
+  # before.vimrc sets the <Space> leader before any mapping; after.vimrc holds the maps shared with
+  # tmux / ghostty / IDEA / VS Code / Zed (docs/keymap.md). ideavimrc is read by IdeaVim
+  # (the idea bundle is opt-in, but the file is harmless without it).
+  - label: Link the vimrc family
+    link:
+      ~/.before.vimrc: before.vimrc
+      ~/.after.vimrc: after.vimrc
+      ~/.ideavimrc: ideavimrc
+
+  - label: Link ~/.vimrc
+    when: { os: "!windows" }
+    link:
+      ~/.vimrc: vimrc
+
+  # Vim on Windows reads ~/_vimrc (and ~/vimfiles), not ~/.vimrc; vimrc picks ~/vimfiles itself.
+  - label: Link ~/_vimrc
+    when: { os: windows }
+    link:
+      ~/_vimrc: vimrc
+
+  # Machine-local overrides, sourced last by vimrc; never tracked, never overwritten.
+  - label: Machine-local ~/.local.vimrc
+    create:
+      ~/.local.vimrc: { file: true }
+
+  # Was `export VISUAL=vim; export EDITOR=$VISUAL` in the old monolithic zshrc.
+  - label: vim as the editor
+    when: { os: "!windows" }
+    env:
+      VISUAL: vim
+      EDITOR: vim

@@ -1,0 +1,16 @@
+#!/bin/sh
+# Fake id: `-nG [USER]` answers from $FAKE_STATE/group (the lines fake usermod/groupadd write):
+# the user's own group, then every group whose member list names the user. Anything else goes to
+# the real id.
+if [ "$1" = -nG ]; then
+  echo "id $*" >> "$FAKE_LOG"
+  u=${2:-${USER:-tester}}
+  groups=$u
+  for g in $(awk -F: -v u="$u" '{ n = split($4, m, ","); for (i = 1; i <= n; i++) if (m[i] == u) print $1 }' \
+      "$FAKE_STATE/group" 2>/dev/null | sort -u); do
+    groups="$groups $g"
+  done
+  echo "$groups"
+  exit 0
+fi
+exec /usr/bin/id "$@"

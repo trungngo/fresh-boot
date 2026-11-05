@@ -1,0 +1,33 @@
+# The shape of the PRIVATE tn config for `tn git` and `tn repo` (docs/tn.md §4.2, §4.3, §7.5;
+# docs/private-overlay.md). Example data only. Write your own to
+# ~/.config/tn/conf.d/git-private.toml (0600) by hand; it loads after git-forges.toml, so it can
+# extend the public forges. Account names, self-hosted hosts and colleagues' names and e-mail addresses
+# never go in this repository.
+
+# Your namespaces on the public forges.
+[forges.gh]
+owner = "alex"                          # default namespace of `tn repo new|clone gh:<repo>`
+
+[forges.bitbucket]
+path = "alex/{project}-{repo}"          # how your Bitbucket repositories are named
+
+# A self-hosted GitLab (the remote is named `gitlab`).
+[forges.work]
+host   = "gitlab.example.com"
+cli    = "glab"
+remote = "gitlab"
+
+# People `tn git as <person>` can commit as. `me` is built from MY_NAME / MY_EMAIL (dot's
+# prompts). A project's tn.toml `identity =` names one of these keys.
+[people.alex-work]
+name    = "Alex Doe"
+email   = "alex@example.com"
+aliases = ["work"]                      # optional extra words `tn git as` matches exactly
+
+[people.jane_roe]
+name  = "Jane Roe"
+email = "jane.roe@example.com"
+
+[people.bobsmith]
+name  = "Bob Smith"
+email = "bobsmith@example.com"

@@ -1,0 +1,119 @@
+# yaml-language-server: $schema=https://github.com/trungngo/dot-cli/releases/latest/download/bundle.schema.json
+#
+# Linux servers (and desktops Docker Desktop does not run on): Docker Engine from Docker's own apt
+# repository. Linux x86_64 desktops, macOS, Windows: Docker Desktop only, no Engine.
+# Opt-in: `dot apply docker`. Why each step looks the way it does: README.md.
+name: docker
+description: Docker Desktop on desktops, Docker Engine + compose/buildx plugins on servers (opt-in)
+requires: [common]
+provides: [docker]
+when: { os: [linux, macos, windows] }
+
+steps:
+  # Docker's repo lags new Ubuntu releases (and publishes some it does not support), so the
+  # codename is probed and the newest LTS it certainly has is the fallback. `replaces:` removes
+  # the one-line docker.list of the apt-key era: two entries for one repo with different
+  # Signed-By keys make apt refuse every source. The keyring keeps Docker's documented name
+  # (docker.asc, armored), so a machine set up by the old module or by hand is taken over in
+  # place rather than left with a second key.
+  - label: Docker apt repository (Ubuntu)
+    when: { os: linux, distro: ubuntu }
+    package_repo:
+      name: docker
+      apt:
+        url: https://download.docker.com/linux/ubuntu
+        suites: "{{ codename }}"
+        fallback_suite: noble
+        components: [stable]
+        key: https://download.docker.com/linux/ubuntu/gpg
+        keyring: /etc/apt/keyrings/docker.asc
+        fingerprint: 9DC8 5822 9FC7 DD38 854A E2D8 8D81 803C 0EBF CD88
+        replaces: [/etc/apt/sources.list.d/docker.list]
+
+  - label: Docker apt repository (Debian)
+    when: { os: linux, distro: debian }
+    package_repo:
+      name: docker
+      apt:
+        url: https://download.docker.com/linux/debian
+        suites: "{{ codename }}"
+        fallback_suite: bookworm
+        components: [stable]
+        key: https://download.docker.com/linux/debian/gpg
+        keyring: /etc/apt/keyrings/docker.asc
+        fingerprint: 9DC8 5822 9FC7 DD38 854A E2D8 8D81 803C 0EBF CD88
+        replaces: [/etc/apt/sources.list.d/docker.list]
+
+  # The compose and buildx plugins are what make `docker compose` / `docker buildx` exist
+  # (Compose v1, the hyphenated `docker-compose`, is EOL). Ubuntu's own docker.io, containerd
+  # and runc conflict with these; apt removes them while installing.
+  # Not on an x86_64 desktop: Docker Desktop (below) brings its own engine, compose and buildx,
+  # and only needs the `docker-ce-cli` of this repository.
+  - label: Docker Engine, CLI and plugins
+    when: { os: linux }
+    if: 'not (role == "desktop" and arch == "x86_64")'
+    package:
+      apt: [docker-ce, docker-ce-cli, containerd.io, docker-buildx-plugin, docker-compose-plugin]
+
+  # Docker Desktop for Linux depends on `docker-ce-cli` (the `docker` command), which only
+  # Docker's repository has; its engine, compose and buildx come inside Desktop.
+  - label: Docker CLI (for Docker Desktop)
+    when: { os: linux, family: debian, arch: x86_64, role: desktop }
+    package:
+      apt: [docker-ce-cli]
+
+  # Docker Desktop for Linux: a .deb Docker publishes at a fixed URL (the file behind it is always
+  # the current release), installed through apt so its dependencies resolve. It has no apt
+  # repository and does not update itself, so this step does: dot re-downloads when the server
+  # reports a changed file (ETag / Last-Modified). x86_64 desktops only (it needs a GUI and
+  # KVM); its engine runs in a VM, reached through the `desktop-linux` context.
+  - label: Docker Desktop (.deb from Docker)
+    when: { os: linux, family: debian, arch: x86_64, role: desktop }
+    download:
+      url: https://desktop.docker.com/linux/main/amd64/docker-desktop-amd64.deb
+      package: docker-desktop
+
+  # The cask was renamed from `docker` to `docker-desktop` upstream; dot adds --adopt
+  # (Docker.app). Skipped when a `docker` CLI is already on PATH (OrbStack, colima, a manual
+  # Docker Desktop), as the old module did: the cask's binaries would conflict with theirs.
+  - label: Docker Desktop
+    when: { os: macos }
+    unless: command -v docker
+    package:
+      cask: [docker-desktop]
+
+  # Windows: needs WSL 2; the installer asks for elevation itself.
+  - label: Docker Desktop
+    when: { os: windows }
+    package:
+      winget: [Docker.DockerDesktop]
+
+  # docker without sudo. Takes effect at the next login (dot prints the notice). No `newgrp`:
+  # it execs an interactive subshell, which does nothing useful in a provisioning run. Docker
+  # Desktop runs as the user and has no `docker` group (no Engine, so none exists).
+  - label: docker group
+    when: { os: linux }
+    if: 'not (role == "desktop" and arch == "x86_64")'
+    user:
+      groups: [docker]
+
+  # Docker Desktop's VM needs /dev/kvm, which the `kvm` group owns. Re-login, as for `docker`.
+  - label: kvm group (Docker Desktop)
+    when: { os: linux, family: debian, arch: x86_64, role: desktop }
+    user:
+      groups: [kvm]
+
+  # The packages enable both on Ubuntu; stated so a stopped or disabled daemon is put right.
+  - label: containerd service
+    when: { os: linux, init: systemd }
+    if: 'not (role == "desktop" and arch == "x86_64")'
+    service:
+      name: containerd
+      manager: systemd
+
+  - label: Docker service
+    when: { os: linux, init: systemd }
+    if: 'not (role == "desktop" and arch == "x86_64")'
+    service:
+      name: docker
+      manager: systemd

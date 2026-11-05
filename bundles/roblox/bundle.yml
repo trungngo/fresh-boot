@@ -1,0 +1,33 @@
+# yaml-language-server: $schema=https://github.com/trungngo/dot-cli/releases/latest/download/bundle.schema.json
+#
+# The Roblox player. Windows only (for now) and opt-in: no profile selects it
+# (`dot apply roblox`). winget's Roblox.Roblox is a `portable` package: it only stores the
+# installer, it never runs it, so this bundle runs Roblox's own installer instead. Roblox Studio
+# is its own bundle (roblox-studio). See README.md.
+name: roblox
+description: Roblox player (Windows, opt-in)
+requires: [common]
+when: { os: windows, role: desktop }
+
+steps:
+  # Roblox's download link redirects to the current RobloxPlayerInstaller.exe on its CDN, so
+  # nothing is pinned. Roblox publishes no checksum: the installer must carry a valid
+  # Authenticode signature from Roblox Corporation before it runs. It installs per user (no UAC)
+  # into %LOCALAPPDATA%\Roblox\Versions\version-*\, and the player updates itself on launch.
+  - label: Install the Roblox player
+    shell:
+      cmd: |
+        $exe = Join-Path ([IO.Path]::GetTempPath()) 'RobloxPlayerInstaller.exe'
+        Invoke-WebRequest -Uri 'https://www.roblox.com/download/client?os=win' -OutFile $exe -UseBasicParsing
+        $sig = Get-AuthenticodeSignature -LiteralPath $exe
+        if ($sig.Status -ne 'Valid' -or $sig.SignerCertificate.Subject -notmatch 'O=Roblox Corporation') {
+          Remove-Item -LiteralPath $exe -ErrorAction SilentlyContinue
+          throw "RobloxPlayerInstaller.exe is not signed by Roblox Corporation ($($sig.Status))"
+        }
+        Write-Output 'The Roblox installer is running: close its window when it says Roblox is installed.'
+        $p = Start-Process -FilePath $exe -Wait -PassThru
+        Remove-Item -LiteralPath $exe -ErrorAction SilentlyContinue
+        exit $p.ExitCode
+      unless: |
+        if (Get-ChildItem -Path "$env:LOCALAPPDATA\Roblox\Versions\*\RobloxPlayerBeta.exe" -ErrorAction SilentlyContinue) { exit 0 }
+        exit 1

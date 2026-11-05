@@ -1,0 +1,111 @@
+# yaml-language-server: $schema=https://github.com/trungngo/dot-cli/releases/latest/download/dot.schema.json
+#
+# Profiles, bundle selection, repo-wide vars and defaults, package name map.
+# Conventions for everything below: CLAUDE.md. Bundles: bundles/<name>/bundle.yml.
+
+# Used only when no profile matches and none is named (a new platform): the portable core.
+bundles: [git, vim, gh, glab, tailscale]
+
+defaults:
+  link:
+    create: true        # make missing parent directories
+    relink: true        # a link pointing elsewhere is repointed
+    on_conflict: backup # a real file in the way is kept as <dest>.dot-backup
+  shell:
+    interpreter: bash   # Windows steps must say `interpreter: pwsh`
+
+# Profiles are chosen from facts; the one matching the most facts wins. Desktop vs server is
+# the `role` fact (display session / graphical.target), never the hostname. Pin one with
+# DOT_PROFILE=<name> in ~/.config/dot/local.env, or pass --profile.
+#
+# `common` is implicit (always applied), so it is not listed. Every bundle below is the default
+# install; everything else is opt-in: `dot apply <bundle>` (nodejs, python, rust, go, java, dotnet,
+# docker, maven, vscode, idea, jetbrains-toolbox, zed, claude, codex, the GUI apps, the games).
+# `tn` (the helper command) comes along with git, whose plugin requires it.
+profiles:
+  mac:
+    description: macOS workstation (Homebrew, casks adopted)
+    match: { os: macos }
+    bundles: &desktop
+      - git
+      - gh
+      - glab
+      - tailscale
+      - zsh
+      - tmux
+      - vim
+      - ghostty
+
+  ubuntu-desktop:
+    description: Ubuntu (or Debian) with a graphical session
+    match: { os: linux, family: debian, role: desktop }
+    bundles: *desktop
+
+  ubuntu-server:
+    description: Headless Ubuntu (or Debian); no GUI bundles
+    match: { os: linux, family: debian, role: server }
+    bundles:
+      - git
+      - gh
+      - glab
+      - tailscale
+      - zsh
+      - tmux
+      - vim
+
+  windows:
+    description: Windows 10/11 (winget first, scoop second; steps run in pwsh)
+    match: { os: windows }
+    defaults:
+      shell:
+        interpreter: pwsh
+    bundles:
+      - git
+      - gh
+      - glab
+      - tailscale
+      - vim
+
+vars:
+  projects_dir:
+    type: path
+    default: ~/myprojects
+    description: Root of ongoing work, <project>/src/<repo> (exported as MYPROJECTS_DIR)
+  learning_dir:
+    type: path
+    default: ~/mylearning
+    description: Scratch area for courses and experiments
+  MY_MACHINE:
+    description: This machine's short name, e.g. U1; used in Claude/Codex session names
+    prompt: "Short name for this machine (letters, digits, dashes; e.g. U1, M2)"
+    persist: local
+    # One machine's own value: `dot apply --host` never copies this machine's to another; it
+    # asks for the remote's (kept in its local.env) or takes `--var MY_MACHINE=<name>`.
+    per_machine: true
+    pattern: "[A-Za-z0-9][A-Za-z0-9-]*"
+  # Personal values: never in a committed file (docs/private-overlay.md). The first interactive
+  # `dot apply` asks for each once and keeps the answer in ~/.config/dot/local.env.
+  MY_NAME:
+    description: Your full name, the git author name (~/.gitconfig, tn's `me`)
+    prompt: "Your full name for git commits"
+    persist: local
+  MY_EMAIL:
+    description: Your e-mail address, the git author e-mail (~/.gitconfig, tn's `me`)
+    prompt: "Your e-mail address for git commits"
+    persist: local
+    pattern: "[^@ ]+@[^@ ]+"
+
+# Package names that differ per manager, for the list form `package: [name, ...]`.
+# A name with no entry for this machine's manager is used as it is. Casks and snaps are
+# never mapped here: use the mapping form `package: { cask: [...], snap: [...] }`.
+packages:
+  git:          { winget: Git.Git }
+  vim:          { winget: vim.vim }
+  curl:         { winget: cURL.cURL }
+  wget:         { winget: JernejSimoncic.Wget }
+  jq:           { winget: jqlang.jq }
+  ripgrep:      { winget: BurntSushi.ripgrep.MSVC }
+  fd:           { apt: fd-find, winget: sharkdp.fd }
+  gh:           { winget: GitHub.cli }
+  glab:         { winget: GLab.GLab }
+  fnm:          { winget: Schniz.fnm }

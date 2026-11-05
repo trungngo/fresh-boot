@@ -1,0 +1,37 @@
+#!/bin/sh
+# Fake uv (Astral). `python list --only-downloads --output-format json` lists a few CPython
+# downloads (a stable 3.99, an older 3.98, a 3.100 prerelease and a freethreaded build, as the
+# real list mixes them); `python install [--default] <minor>` records the minor in
+# $FAKE_STATE/uv-python and puts python<minor> (and with --default python3 / python) stubs in
+# uv's bin directory; `python dir --bin` prints that directory ($UV_PYTHON_BIN_DIR,
+# $XDG_BIN_HOME, $XDG_DATA_HOME/../bin, ~/.local/bin, as uv resolves it). Refuses to write
+# outside the sandbox (the parent of $FAKE_STATE). Anything else succeeds.
+echo "uv $*" >> "$FAKE_LOG"
+bindir=${UV_PYTHON_BIN_DIR:-${XDG_BIN_HOME:-}}
+[ -n "$bindir" ] || { [ -n "${XDG_DATA_HOME:-}" ] && bindir=$(dirname "$XDG_DATA_HOME")/bin; }
+[ -n "$bindir" ] || bindir=$HOME/.local/bin
+case "$1 $2" in
+  "python list")
+    case " $* " in *" --only-downloads "*) ;; *) exit 0 ;; esac
+    k='"key":"cpython-'
+    printf '[{%s3.100.0rc1-linux-x86_64-gnu","version":"3.100.0rc1"},' "$k"
+    printf '{%s3.99.1+freethreaded-linux-x86_64-gnu","version":"3.99.1"},' "$k"
+    printf '{%s3.99.1-linux-x86_64-gnu","version":"3.99.1"},' "$k"
+    printf '{%s3.98.5-linux-x86_64-gnu","version":"3.98.5"}]\n' "$k" ;;
+  "python dir")
+    case " $* " in *" --bin "*) echo "$bindir" ;; *) echo "${XDG_DATA_HOME:-$HOME/.local/share}/uv/python" ;; esac ;;
+  "python install")
+    sb=${FAKE_STATE:+${FAKE_STATE%/state}}
+    case "$bindir/" in "$sb"/?*) [ -n "$sb" ] ;; *) false ;; esac || { echo "fake uv: bin dir outside a sandbox" >&2; exit 3; }
+    shift 2; default=0; minor=
+    for a in "$@"; do
+      case "$a" in --default) default=1 ;; --preview-features) ;; -*) ;; python-install-default) ;; *) minor=$a ;; esac
+    done
+    [ -n "$minor" ] || { echo "fake uv: no version requested" >&2; exit 2; }
+    echo "$minor" >> "$FAKE_STATE/uv-python"
+    mkdir -p "$bindir"
+    names=python$minor; [ $default = 1 ] && names="$names python3 python"
+    for n in $names; do printf '#!/bin/sh\necho "%s $*" >> "$FAKE_LOG"\n' "$n" > "$bindir/$n"; chmod +x "$bindir/$n"; done ;;
+  "generate-shell-completion "*) echo "# fake uv completion" ;;
+esac
+exit 0

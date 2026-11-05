@@ -1,0 +1,199 @@
+# yaml-language-server: $schema=https://github.com/trungngo/dot-cli/releases/latest/download/bundle.schema.json
+#
+# The clean-machine baseline: the only thing any other bundle may assume exists. Every bundle
+# says `requires: [common]`, which also makes the `path:` / `env:` entries below visible to it.
+# Reference bundle for porters: see CLAUDE.md "Writing a bundle".
+name: common
+description: Baseline packages, directories, PATH and env every other bundle assumes
+implicit: true
+
+steps:
+  # macOS: Homebrew is the package manager for everything else. The installer asks for the
+  # sudo password and a RETURN itself, so it gets the terminal. It never edits shell rc files
+  # (it only prints a hint); brew's PATH comes from the `path:` step below. The check looks where
+  # this Mac's brew belongs ({{ homebrew_prefix }}, by arch), or anywhere on PATH.
+  - label: Install Homebrew
+    when: { os: macos }
+    shell:
+      cmd: /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+      unless: command -v brew || test -x "{{ homebrew_prefix }}/bin/brew"
+      interactive: true
+
+  # {{ homebrew_prefix }}: /opt/homebrew on Apple silicon, /usr/local on Intel. Intel Macs have
+  # /usr/local/bin on the default PATH already, but after the system directories, so /usr/bin/vim
+  # and /usr/bin/curl would win over Homebrew's.
+  - label: Homebrew on PATH
+    when: { os: macos }
+    path: ["{{ homebrew_prefix }}/bin", "{{ homebrew_prefix }}/sbin"]
+
+  # The rest of what the old zshrc's `eval "$(brew shellenv)"` exported (a process per shell
+  # start); tools and formulae read HOMEBREW_PREFIX. Static per prefix, so plain `env:`.
+  - label: Homebrew environment (Apple silicon)
+    when: { os: macos, arch: aarch64 }
+    env:
+      HOMEBREW_PREFIX: /opt/homebrew
+      HOMEBREW_CELLAR: /opt/homebrew/Cellar
+      HOMEBREW_REPOSITORY: /opt/homebrew
+
+  - label: Homebrew environment (Intel)
+    when: { os: macos, arch: x86_64 }
+    env:
+      HOMEBREW_PREFIX: /usr/local
+      HOMEBREW_CELLAR: /usr/local/Cellar
+      HOMEBREW_REPOSITORY: /usr/local/Homebrew
+
+  # ~/.local/bin is where user-level installers (claude, codex, fnm, github_release) put
+  # executables, and where tn lives. On PATH before any of them runs, which is also what stops
+  # the Codex and devtunnel installers from appending their own PATH line to ~/.zshrc.
+  - label: ~/.local/bin on PATH
+    when: { os: "!windows" }
+    path: [~/.local/bin]
+
+  # Windows has no `dot env` in every shell: `persist: user` also writes the folder into the
+  # user's Path (HKCU\Environment), so tn.cmd is found from cmd, PowerShell and Explorer.
+  # `dot remove common` takes the entry out again only if dot added it.
+  - label: ~/.local/bin on PATH (Windows, persisted)
+    when: { os: windows }
+    path:
+      ~/.local/bin: { persist: user }
+
+  # Clean machine: ca-certificates, curl, git and unzip first (git steps, fnm and godot need
+  # them), then the everyday tools.
+  - label: Baseline tools
+    package:
+      apt: [ca-certificates, curl, wget, git, unzip, vim, ranger, htop, openssh-client]
+      brew: [curl, wget, git, vim, ranger, htop]
+      winget: [Git.Git]
+
+  # Git LFS. Git for Windows ships it, already enabled in its system gitconfig. Elsewhere the
+  # filter goes into git's system config, never ~/.gitconfig (rendered by the git bundle, which
+  # would drop it on the next apply): /etc/gitconfig on Linux, Homebrew's etc/gitconfig (owned
+  # by the user) on macOS. --skip-repo: no hooks in whatever repository dot runs from. Ubuntu's
+  # git-lfs package runs the same command from its postinst, so on Linux the step only repairs a
+  # system config that lost the filter.
+  - label: Git LFS
+    when: { os: "!windows" }
+    package:
+      apt: [git-lfs]
+      brew: [git-lfs]
+
+  - label: Enable Git LFS system-wide
+    when: { os: linux }
+    shell:
+      cmd: sudo git lfs install --system --skip-repo
+      unless: git config --system --get filter.lfs.process
+      sudo: true
+
+  - label: Enable Git LFS system-wide
+    when: { os: macos }
+    shell:
+      cmd: git lfs install --system --skip-repo
+      unless: git config --system --get filter.lfs.process
+
+  # Python 3.11+ for tn (bundles/tn: tomllib is 3.11+). macOS' /usr/bin/python3 is 3.9, so
+  # Homebrew's `python` (the current CPython, linked as python3 ahead of /usr/bin on PATH).
+  # Ubuntu's python3 (3.12 on 24.04; 22.04's 3.10 is too old for tn). Windows: the Python
+  # install manager (`py`), then its default runtime (the latest CPython).
+  - label: Python 3 (for tn)
+    package:
+      apt: [python3]
+      brew: [python]
+      winget: [Python.PythonInstallManager]
+
+  # PowerShell 7: the Windows profile runs its shell steps in `pwsh` (dot.yml), and Windows
+  # ships only PowerShell 5.1 (`powershell.exe`). Installed before the first shell step; dot
+  # re-reads PATH after a winget install, so `pwsh` is found by the steps that follow.
+  - label: PowerShell 7 (Windows)
+    when: { os: windows }
+    package:
+      winget: [Microsoft.PowerShell]
+
+  - label: Python runtime (Windows)
+    when: { os: windows }
+    shell:
+      cmd: py install --yes default
+      unless: py -3 -c "import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)"
+
+  # The install manager puts only `python` / `py` on PATH (App Execution Aliases). `pip` is one
+  # of its global shortcuts in %LOCALAPPDATA%\Python\bin, which it asks you to add to PATH
+  # yourself; the tools pip installs land in the runtime's Scripts directory, per version
+  # (%LOCALAPPDATA%\Python\pythoncore-3.X-64\Scripts). Both go on the user PATH; a previous
+  # version's Scripts is dropped. Takes effect in new terminals.
+  - label: pip on PATH (Windows)
+    when: { os: windows }
+    shell:
+      prelude: |
+        $bin = Join-Path $env:LOCALAPPDATA 'Python\bin'
+        $scripts = (py -3 -c "import sysconfig; print(sysconfig.get_path('scripts'))").Trim()
+        $parts = @(([Environment]::GetEnvironmentVariable('Path', 'User') ?? '') -split ';' | Where-Object { $_ })
+      cmd: |
+        $keep = @($parts | Where-Object { $_ -notmatch '\\Python\\pythoncore-[^\\]+\\Scripts\\?$' -and $_ -ne $bin })
+        [Environment]::SetEnvironmentVariable('Path', (@($keep) + $bin + $scripts) -join ';', 'User')
+      unless: |
+        if ($parts -notcontains $bin -or $parts -notcontains $scripts) { exit 1 }
+        if (@($parts | Where-Object { $_ -match '\\Python\\pythoncore-[^\\]+\\Scripts\\?$' }).Count -ne 1) { exit 1 }
+        exit 0
+
+  # snapd for the snap-based bundles (slack). Ubuntu ships it, minimal images may
+  # not; it needs systemd as PID 1, so not in containers or WSL without systemd.
+  - label: snapd
+    when: { os: linux, init: systemd }
+    package:
+      apt: [snapd]
+
+  # Snap commands live in /snap/bin, which Ubuntu adds through /etc/profile.d: bash login shells
+  # get it, zsh (which does not read /etc/profile.d) does not. Appended, so a snap never shadows
+  # a system or Homebrew tool of the same name.
+  - label: /snap/bin on PATH
+    when: { os: linux, init: systemd }
+    path:
+      /snap/bin: { position: append }
+
+  # Ubuntu packages Powerline fonts; macOS gets a Nerd Font (a superset of Powerline's glyphs).
+  - label: Desktop fonts
+    when: { os: linux, role: desktop }
+    package:
+      apt: [fonts-powerline]
+
+  - label: Nerd Font
+    when: { os: macos }
+    package:
+      cask: [font-meslo-lg-nerd-font]
+
+  # System Settings > Desktop & Dock: "Automatically hide and show the Dock".
+  - label: Dock auto-hide
+    when: { os: macos }
+    macos_defaults:
+      domain: com.apple.dock
+      key: autohide
+      type: bool
+      value: true
+
+  # System Settings > Mouse: "Natural" scrolling off (scroll wheel and trackpad move the usual way).
+  - label: Natural scrolling off
+    when: { os: macos }
+    macos_defaults:
+      domain: NSGlobalDomain
+      key: com.apple.swipescrolldirection
+      type: bool
+      value: false
+
+  - label: Private ~/.ssh
+    when: { os: "!windows" }
+    create:
+      ~/.ssh: { mode: "0700" }
+
+  - label: Work directories
+    create:
+      - "{{ projects_dir }}"
+      - "{{ learning_dir }}"
+      - ~/.local/bin
+
+  # The project layout convention (CLAUDE.md): tn derives context from $PWD under this root.
+  - label: Project roots in the environment
+    env:
+      MYPROJECTS_DIR: "{{ projects_dir }}"
+
+  # Dangling links into this repository (a bundle file renamed or deleted) left in $HOME.
+  - label: Remove dangling links in ~
+    clean: ["~"]

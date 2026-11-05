@@ -1,0 +1,4 @@
+#!/bin/sh
+# Fake loginctl: logs and succeeds (enable-linger).
+echo "loginctl $*" >> "$FAKE_LOG"
+exit 0

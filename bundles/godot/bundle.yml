@@ -1,0 +1,70 @@
+# yaml-language-server: $schema=https://github.com/trungngo/dot-cli/releases/latest/download/bundle.schema.json
+#
+# The Godot editor: the official build from GitHub releases on Linux (Ubuntu's package lags
+# well behind), the cask on macOS, winget on Windows. Editor settings are not tracked: Godot rewrites
+# editor_settings-4.tres wholesale. Why and gotchas: README.md.
+name: godot
+description: Godot game engine
+requires: [common]
+when: { os: [linux, macos, windows], role: desktop }
+
+vars:
+  # The .NET/C# build instead of the standard one (`godot-mono` cask, `_mono_` release asset).
+  # Needs a .NET SDK: `dot apply dotnet`. Per machine: `godot_mono=true` in
+  # ~/.config/dot/local.env, or `--var godot_mono=true`.
+  godot_mono:
+    type: bool
+    default: false
+    description: Install Godot's .NET (C#) build
+
+steps:
+  - label: Install Godot
+    when: { os: macos }
+    if: not godot_mono
+    package:
+      cask: [godot]
+
+  - label: Install Godot (.NET)
+    when: { os: macos }
+    if: godot_mono
+    package:
+      cask: [godot-mono]
+
+  # winget's GodotEngine packages are the official zips; winget links `godot` into its Links
+  # directory, so it is on PATH.
+  - label: Install Godot
+    when: { os: windows }
+    if: not godot_mono
+    package:
+      winget: [GodotEngine.GodotEngine]
+
+  - label: Install Godot (.NET)
+    when: { os: windows }
+    if: godot_mono
+    package:
+      winget: [GodotEngine.GodotEngine.Mono]
+
+  # A self-contained build: no sudo. The whole unpacked tree is replaced on an update (the mono
+  # build ships a GodotSharp/ directory next to the binary), and ~/.local/bin/godot links to the
+  # executable, whatever its versioned name. No version anywhere: the latest release's asset for
+  # this CPU (standard: Godot_v<ver>-stable_linux.x86_64.zip, mono:
+  # Godot_v<ver>-stable_mono_linux_x86_64.zip).
+  - label: Install Godot
+    when: { os: linux }
+    download:
+      release:
+        repo: godotengine/godot
+        asset:
+          linux/x86_64: "Godot_v*-stable_{{ 'mono_linux_x86_64' if godot_mono else 'linux.x86_64' }}.zip"
+          linux/aarch64: "Godot_v*-stable_{{ 'mono_linux_arm64' if godot_mono else 'linux.arm64' }}.zip"
+      dest: ~/.local/share/godot
+      extract: zip
+      replace: true
+      bin:
+        godot: "Godot_v*"
+
+  # So the editor shows up in the desktop's launcher. Desktop entries do not expand `~`.
+  - label: Godot desktop entry
+    when: { os: linux }
+    template:
+      ~/.local/share/applications/godot.desktop: godot.desktop

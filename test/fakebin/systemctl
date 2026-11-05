@@ -1,0 +1,27 @@
+#!/bin/sh
+# Fake systemctl: enable/disable/start/stop (and `enable --now`) record units in
+# $FAKE_STATE/systemd as `enabled <unit>` / `active <unit>` lines; is-enabled / is-active answer
+# from there (a unit is disabled and inactive until something turns it on). `--user` units are
+# kept apart as `user:<unit>`. restart / reload / daemon-reload just succeed.
+echo "systemctl $*" >> "$FAKE_LOG"
+db="$FAKE_STATE/systemd"; touch "$db"
+scope=
+[ "$1" = --user ] && { scope=user:; shift; }
+verb=$1; shift
+now=0; units=
+for a in "$@"; do case "$a" in --now) now=1 ;; -*) ;; *) units="$units $a" ;; esac; done
+has() { grep -qxF "$1 $scope$2" "$db"; }
+add() { has "$1" "$2" || echo "$1 $scope$2" >> "$db"; }
+del() { grep -vxF "$1 $scope$2" "$db" > "$db.tmp"; mv "$db.tmp" "$db"; }
+rc=0
+for u in $units; do
+  case "$verb" in
+    is-enabled) if has enabled "$u"; then echo enabled; else echo disabled; rc=1; fi ;;
+    is-active)  if has active "$u"; then echo active; else echo inactive; rc=3; fi ;;
+    enable)     add enabled "$u"; [ $now = 1 ] && add active "$u" ;;
+    disable)    del enabled "$u"; [ $now = 1 ] && del active "$u" ;;
+    start)      add active "$u" ;;
+    stop)       del active "$u" ;;
+  esac
+done
+exit $rc

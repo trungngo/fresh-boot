@@ -1,0 +1,53 @@
+# yaml-language-server: $schema=https://github.com/trungngo/dot-cli/releases/latest/download/bundle.schema.json
+#
+# Zed: the editor, settings.json and keymap.json. Linux gets the official release tarball
+# unpacked into ~/.local/zed.app (what zed.dev/install.sh does, minus its re-download on every
+# run); macOS the cask; Windows winget. Opt-in: no profile selects it (`dot apply zed`).
+# See README.md.
+name: zed
+description: Zed editor, settings.json and keymap.json
+requires: [common]
+when: { os: [linux, macos, windows], role: desktop }
+
+steps:
+  - label: Install Zed
+    when: { os: [macos, windows] }
+    package:
+      cask: [zed]
+      winget: [ZedIndustries.Zed]
+
+  # The latest release's zed-linux-<arch>.tar.gz (one top-level zed.app/ directory), checked
+  # against the release's published digest, swapped in whole on an update and skipped while
+  # current. ~/.local/bin/zed -> zed.app/bin/zed, as the official installer links it. No sudo.
+  - label: Install Zed (release tarball)
+    when: { os: linux }
+    download:
+      release:
+        repo: zed-industries/zed
+        asset:
+          linux/x86_64: zed-linux-x86_64.tar.gz
+          linux/aarch64: zed-linux-aarch64.tar.gz
+      dest: ~/.local/zed.app
+      extract: tar.gz
+      strip: 1
+      replace: true
+      bin: { zed: bin/zed }
+
+  # The installer's other job: a desktop entry pointing into ~/.local/zed.app.
+  - label: Zed desktop entry
+    when: { os: linux }
+    template:
+      ~/.local/share/applications/dev.zed.Zed.desktop: dev.zed.Zed.desktop
+
+  # Zed reads ~/.config/zed on macOS too (not Application Support); %APPDATA%\Zed on Windows.
+  - label: Link Zed settings and keymap
+    when: { os: [linux, macos] }
+    link:
+      ~/.config/zed/settings.json: settings.json
+      ~/.config/zed/keymap.json: keymap.json
+
+  - label: Link Zed settings and keymap (Windows)
+    when: { os: windows }
+    link:
+      "{{ config_dir }}/Zed/settings.json": settings.json
+      "{{ config_dir }}/Zed/keymap.json": keymap.json

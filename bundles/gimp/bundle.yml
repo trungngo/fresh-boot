@@ -1,0 +1,25 @@
+# yaml-language-server: $schema=https://github.com/trungngo/dot-cli/releases/latest/download/bundle.schema.json
+#
+# GIMP, the GNU Image Manipulation Program: apt on Linux, cask on macOS, winget on Windows.
+# Opt-in: no profile selects it (`dot apply gimp`). Nothing is linked: GIMP keeps only its own
+# generated settings. Why and gotchas: README.md.
+name: gimp
+description: GIMP image editor (opt-in)
+requires: [common]
+when: { role: desktop }
+
+steps:
+  # Ubuntu's archive package: the distribution's own build, updated with the system. The newest
+  # upstream release ships first on Flathub (GIMP's official Linux channel), which would need
+  # flatpak; the GIMP snap is a community build, not upstream's.
+  - label: Install GIMP
+    when: { os: linux, family: debian }
+    package:
+      apt: [gimp]
+
+  # winget `GIMP.GIMP` tracks the newest release (`GIMP.GIMP.2` / `GIMP.GIMP.3` pin a major).
+  - label: Install GIMP
+    when: { os: [macos, windows] }
+    package:
+      cask: [gimp]
+      winget: [GIMP.GIMP]

@@ -1,0 +1,14 @@
+# yaml-language-server: $schema=https://github.com/trungngo/dot-cli/releases/latest/download/bundle.schema.json
+#
+# Roblox Studio, Roblox's game editor: winget on Windows. Windows only (for now) and opt-in:
+# no profile selects it (`dot apply roblox-studio`). The player is its own bundle (roblox).
+# See README.md.
+name: roblox-studio
+description: Roblox Studio game editor (Windows, opt-in)
+requires: [common]
+when: { os: windows, role: desktop }
+
+steps:
+  - label: Install Roblox Studio
+    package:
+      winget: [Roblox.RobloxStudio]

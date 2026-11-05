@@ -1,0 +1,41 @@
+# yaml-language-server: $schema=https://github.com/trungngo/dot-cli/releases/latest/download/bundle.schema.json
+#
+# The Rust toolchain through rustup, the official installer (Ubuntu's rustc lags well behind).
+# rustup updates itself and the toolchain, so nothing is pinned. See README.md.
+name: rust
+description: Rust via rustup (+ rust-analyzer, rust-src)
+requires: [common]
+provides: [rust]
+when: { os: [linux, macos] }
+
+steps:
+  # rustup brings no linker: without `cc`, the first `cargo build` fails ("linker `cc` not
+  # found"). macOS has one from the Command Line Tools, which Homebrew already required.
+  - label: C toolchain for cargo
+    when: { os: linux }
+    package:
+      apt: [build-essential]
+
+  - label: CARGO_HOME
+    env:
+      CARGO_HOME: "{{ home }}/.cargo"
+
+  # Before the installer, so its `unless` / `upgrade` and later bundles find rustup and cargo.
+  - label: Cargo binaries on PATH
+    path: [~/.cargo/bin]
+
+  # --no-modify-path: otherwise rustup-init prepends ~/.cargo/bin in ~/.profile, ~/.bashrc and
+  # ~/.zshenv; the `path:` step above does it for dot and every shell (`dot env`).
+  # The default profile is rustc, cargo, rustfmt and clippy; plus rust-analyzer and rust-src.
+  # Upgrade: rustup itself, then stable (components follow the toolchain; `component add` is a
+  # no-op when they are there and restores them if they were removed).
+  - label: Install rustup and the stable toolchain
+    shell:
+      cmd: >-
+        set -o pipefail &&
+        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs |
+        sh -s -- -y --no-modify-path --profile default -c rust-analyzer,rust-src
+      unless: test -x "$CARGO_HOME/bin/rustup"
+      upgrade: >-
+        rustup self update && rustup update stable &&
+        rustup component add rust-analyzer rust-src

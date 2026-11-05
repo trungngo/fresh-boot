@@ -1,0 +1,27 @@
+#!/bin/sh
+# Fake glab (GitLab CLI). `auth login [--hostname H] [--stdin]` records only the host (default
+# gitlab.com, never a token) in $FAKE_STATE/glab-auth; `auth status --hostname H`
+# succeeds once H is recorded. `config set|get client_id --host H` keep the value in
+# $FAKE_STATE/glab-config. Anything else succeeds. Logs argv, never stdin.
+echo "glab $*" >> "$FAKE_LOG"
+host=""; prev=""
+for a in "$@"; do
+  case "$prev" in --hostname|--host) host=$a ;; esac
+  prev=$a
+done
+case "$1 $2" in
+  "auth login")
+    # Interactive login (no --stdin): nothing to read; record gitlab.com as logged in.
+    case " $* " in
+      *" --stdin "*) token=$(cat); [ -n "$token" ] || { echo "glab: empty token" >&2; exit 1; } ;;
+    esac
+    echo "${host:-gitlab.com}" >> "$FAKE_STATE/glab-auth" ;;
+  "auth status")
+    grep -qxF -e "$host" "$FAKE_STATE/glab-auth" 2>/dev/null || { echo "$host: not logged in" >&2; exit 1; } ;;
+  "config set")
+    echo "$host $4" >> "$FAKE_STATE/glab-config" ;;
+  "config get")
+    grep "^$host " "$FAKE_STATE/glab-config" 2>/dev/null | tail -1 | cut -d' ' -f2- ;;
+  "completion -s") echo "# fake glab completion" ;;
+esac
+exit 0

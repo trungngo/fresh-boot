@@ -1,0 +1,69 @@
+" Personal vim configuration, linked by dot (bundles/vim in this repository)
+" to ~/.vimrc, and to ~/_vimrc on Windows.
+"
+" Plain Vim: no plugin manager and no plugins, only what ships with Vim.
+" (This replaced oh-my-vim + NeoBundle, then vim-plug; both are gone.)
+"
+" Layout:
+"   ~/.before.vimrc   settings that must apply before any mapping (leader)
+"   this file         core settings
+"   ~/.after.vimrc    personal maps, functions and overrides
+"   ~/.local.vimrc    this machine only, untracked (created empty by dot)
+
+set nocompatible
+
+if filereadable(expand("~/.before.vimrc"))
+    source ~/.before.vimrc
+endif
+
+" ------------------------------------------------------------- packages ---
+
+" Optional packages that ship with Vim itself (no plugin manager, nothing
+" downloaded). silent!: an older Vim without one just goes without it.
+" % jumps between if/else/endif, HTML tags, ...
+silent! packadd! matchit
+" Honours .editorconfig (Vim 9.0.1799+).
+silent! packadd! editorconfig
+" gc{motion} / gcc toggle comments (Vim 9.1+).
+silent! packadd! comment
+
+" ------------------------------------------------------------------- core ---
+
+syntax enable
+filetype plugin indent on
+
+set encoding=utf-8
+set hidden
+set number
+set ruler
+set showcmd
+set backspace=indent,eol,start
+
+set incsearch
+set hlsearch
+set ignorecase
+set smartcase
+
+set expandtab
+set shiftwidth=4
+set softtabstop=4
+set tabstop=4
+set autoindent
+
+set laststatus=2
+set wildmenu
+set wildmode=list:longest,full
+
+set nobackup
+set nowritebackup
+set noswapfile
+
+if filereadable(expand("~/.after.vimrc"))
+    source ~/.after.vimrc
+endif
+
+" Machine-local overrides win: sourced last. (The old repo created this file but
+" nothing sourced it after oh-my-vim was dropped.)
+if filereadable(expand("~/.local.vimrc"))
+    source ~/.local.vimrc
+endif

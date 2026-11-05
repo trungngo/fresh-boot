@@ -1,0 +1,51 @@
+# yaml-language-server: $schema=https://github.com/trungngo/dot-cli/releases/latest/download/bundle.schema.json
+#
+# The Eclipse Temurin JDK (Adoptium), current LTS: Adoptium's apt repository on Debian/Ubuntu,
+# the Temurin cask on macOS, winget on Windows. Every channel names the LTS major in its package
+# ID, the only version number here. See README.md.
+name: java
+description: Eclipse Temurin JDK, current LTS (Adoptium apt repo, cask, winget)
+requires: [common]
+provides: [java]
+
+steps:
+  # Adoptium's own apt repository (Ubuntu's archive has no Temurin). The keyring and sources
+  # names are the ones Adoptium's instructions use (`replaces:` drops their one-line
+  # adoptium.list). Adoptium publishes a suite per supported codename and lags new Ubuntu
+  # releases (no questing yet): the noble suite serves those.
+  - label: Adoptium apt repository
+    package_repo:
+      name: adoptium
+      apt:
+        url: https://packages.adoptium.net/artifactory/deb
+        suites: "{{ codename }}"
+        fallback_suite: noble
+        components: [main]
+        key: https://packages.adoptium.net/artifactory/api/gpg/key/public
+        keyring: /etc/apt/keyrings/adoptium.asc
+        fingerprint: 3B04 D753 C905 0D9A 5D34 3F39 843C 48A5 65F8 F04B
+        replaces: [/etc/apt/sources.list.d/adoptium.list]
+
+  # The current LTS, by name: every channel puts the major version in the package ID, and a
+  # pattern (`temurin-*-jdk`) would pick the newest feature release (non-LTS 26, 27, ...), not
+  # the LTS. Move all three to the next LTS when it ships (every two years, September).
+  # The cask is a .pkg (runs `sudo installer`): it needs a terminal on macOS.
+  - label: Install Temurin JDK (LTS)
+    package:
+      apt: [temurin-25-jdk]
+      cask: [temurin@25]
+      winget: [EclipseAdoptium.Temurin.25.JDK]
+
+  # JAVA_HOME for tools that read it (Gradle, IDEs); `java` itself is already on PATH
+  # (update-alternatives, /usr/bin/java on macOS, the MSI on Windows).
+  - label: Link the JAVA_HOME shell integration
+    when: { os: [linux, macos] }
+    link:
+      ~/.config/zsh/conf.d/java.zsh: java.zsh
+
+  # The sdkman bundle is gone: its conf.d link would dangle (and zsh would fail to source it).
+  # Only a link is removed. ~/.sdkman itself is left alone: delete it by hand.
+  - label: Retire the SDKMAN shell integration
+    when: { os: [linux, macos] }
+    absent:
+      ~/.config/zsh/conf.d/sdkman.zsh: { only: link }

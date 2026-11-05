@@ -1,0 +1,13 @@
+#!/bin/sh
+# Fake gsettings: `get|set|list-keys <schema> [<key> [<value>]]`. Values live in
+# $FAKE_STATE/gsettings/<schema>.<key> (a relocatable schema's `:` and `/` become `_`); an unset
+# key reads as "@as []". list-keys succeeds for any schema (a GNOME desktop).
+echo "gsettings $*" >> "$FAKE_LOG"
+dir="$FAKE_STATE/gsettings"
+schema=$(printf '%s' "$2" | tr ':/' '__')
+case "$1" in
+  get) cat "$dir/$schema.$3" 2>/dev/null || echo "@as []" ;;
+  set) mkdir -p "$dir" && printf '%s\n' "$4" > "$dir/$schema.$3" ;;
+  list-keys) exit 0 ;;
+  *) echo "fake gsettings: unknown command $1" >&2; exit 1 ;;
+esac

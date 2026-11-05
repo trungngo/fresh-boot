@@ -1,0 +1,4 @@
+#!/bin/sh
+echo "dpkg $*" >> "$FAKE_LOG"
+[ "$1" = --print-architecture ] && echo amd64
+exit 0

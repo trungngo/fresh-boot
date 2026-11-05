@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Godot Engine
+Comment=Multi-platform 2D and 3D game engine
+Exec={{ home }}/.local/bin/godot %f
+Icon=godot
+Terminal=false
+Categories=Development;IDE;
+MimeType=application/x-godot-project;

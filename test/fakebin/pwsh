@@ -1,0 +1,6 @@
+#!/bin/sh
+# Fake pwsh for `win` plans on a Unix host: dot runs `unless:` checks while planning, through
+# `pwsh -NoProfile -NonInteractive -EncodedCommand <base64>`. Logs, then fails, so every guarded
+# Windows step plans as pending (nothing is installed on a fresh machine).
+echo "pwsh $*" >> "$FAKE_LOG"
+exit 1

@@ -1,0 +1,26 @@
+# yaml-language-server: $schema=https://github.com/trungngo/dot-cli/releases/latest/download/bundle.schema.json
+#
+# tmux and ~/.tmux.conf. Prefix C-a, splits and pane keys shared with ghostty, vim and the
+# IDEs: docs/keymap.md. The claude and codex tn plugins run their sessions in tmux. This bundle
+# also ships the `tn tmux` plugin (new / attach / ls / kill; docs/tn.md §7.6).
+name: tmux
+description: tmux, ~/.tmux.conf and `tn tmux`
+requires: [common, tn]
+when: { os: [linux, macos] }
+
+steps:
+  - label: Install tmux
+    package:
+      apt: [tmux]
+      brew: [tmux]
+
+  # Copied, never linked (as every tn plugin): the command keeps working while this checkout
+  # moves or is mid-edit. tests/ is never copied.
+  - label: Copy the tn plugin
+    copy:
+      ~/.local/share/tn/plugins/tmux.py: plugin.py
+
+  # Linked, not copied: `C-a C-r` reloads it, so edits in the repo take effect at once.
+  - label: Link ~/.tmux.conf
+    link:
+      ~/.tmux.conf: tmux.conf

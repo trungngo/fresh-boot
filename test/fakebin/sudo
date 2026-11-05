@@ -1,0 +1,6 @@
+#!/bin/sh
+# Fake sudo: logs, then runs the command as this user (files land in the sandbox).
+echo "sudo $*" >> "$FAKE_LOG"
+[ "$1" = "-n" ] && shift
+case "$1" in true|-v) exit 0 ;; esac
+exec "$@"

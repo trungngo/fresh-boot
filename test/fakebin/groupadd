@@ -1,0 +1,5 @@
+#!/bin/sh
+# Fake groupadd GROUP: adds an empty group line to $FAKE_STATE/group (read by fake getent / id).
+echo "groupadd $*" >> "$FAKE_LOG"
+for a in "$@"; do g=$a; done
+grep -q "^$g:" "$FAKE_STATE/group" 2>/dev/null || echo "$g:x:1002:" >> "$FAKE_STATE/group"

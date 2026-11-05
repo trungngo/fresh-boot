@@ -1,0 +1,72 @@
+#!/bin/sh
+# Fake curl: `-o FILE` writes an ASCII-armored "key" carrying the fingerprints fake gpg reports
+# for it: those listed for its URL in $FAKE_STATE/keys (lines `<url> <fpr> [<fpr>...]`), else
+# $FAKE_STATE/fpr. A HEAD probe (-I) succeeds; anything else (Homebrew's cask API) prints a cask
+# with an `app` artifact. Never touches the network.
+# A vendor `https://.../install.sh` (piped to a shell: claude) prints a script that logs
+# and leaves a stub executable in ~/.local/bin, named after the URL's last directory, else the
+# host's first label (claude.ai/install.sh -> claude, chatgpt.com/codex/install.sh -> codex);
+# claude's is test/fakeclaude/claude, which keeps installed plugins.
+# sh.rustup.rs prints a stand-in installer (which refuses to run without --no-modify-path) that
+# puts rustup/rustc/cargo stubs in $CARGO_HOME/bin.
+# Homebrew's install.sh prints one that copies test/fakebrew/brew to $FAKE_BREW_PREFIX/bin/brew.
+# Every stand-in installer refuses to write outside the sandbox: $HOME and its target directory
+# must lie under the sandbox directory (the parent of $FAKE_STATE), so a fake run by mistake with
+# the real HOME (or a real CARGO_HOME) fails instead of overwriting real tools.
+echo "curl $*" >> "$FAKE_LOG"
+out=""; head=0; url=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -o) out="$2"; shift ;;
+    -*I*) head=1 ;;
+    -*) ;;
+    *) url="$1" ;;
+  esac
+  shift
+done
+[ $head = 1 ] && exit 0
+if [ -n "$out" ]; then
+  fprs=$(awk -v u="$url" '$1 == u { $1 = ""; print }' "$FAKE_STATE/keys" 2>/dev/null | head -1)
+  [ -n "$fprs" ] || fprs=$(cat "$FAKE_STATE/fpr" 2>/dev/null)
+  printf -- '-----BEGIN PGP PUBLIC KEY BLOCK-----\nComment: fake-fpr %s\n\nfake\n-----END PGP PUBLIC KEY BLOCK-----\n' "$fprs" > "$out"
+  exit 0
+fi
+case "$url" in
+  https://sh.rustup.rs*)
+    cat <<'SH'
+echo "installer rustup $*" >> "$FAKE_LOG"
+case " $* " in *" --no-modify-path "*) ;; *) echo "fake rustup-init: would modify PATH" >&2; exit 3 ;; esac
+b=${CARGO_HOME:-$HOME/.cargo}/bin
+sb=${FAKE_STATE:+${FAKE_STATE%/state}}
+case "$HOME/" in "$sb"/?*) ;; *) sb= ;; esac
+case "$b" in "$HOME"/*) [ -n "$sb" ] ;; *) false ;; esac || { echo "fake rustup-init: outside a sandbox" >&2; exit 3; }
+mkdir -p "$b"
+for x in rustup rustc cargo; do printf '#!/bin/sh\necho "%s $*" >> "$FAKE_LOG"\n' $x > "$b/$x"; chmod +x "$b/$x"; done
+SH
+    exit 0 ;;
+  https://raw.githubusercontent.com/Homebrew/install/*/install.sh)
+    brew=$(cd "$(dirname "$0")/../fakebrew" && pwd)/brew
+    cat <<SH
+echo "installer homebrew" >> "\$FAKE_LOG"
+p=\${FAKE_BREW_PREFIX:-}
+sb=\${FAKE_STATE:+\${FAKE_STATE%/state}}
+case "\$p" in "\$sb"/?*) [ -n "\$sb" ] ;; *) false ;; esac || { echo "fake Homebrew installer: FAKE_BREW_PREFIX not in a sandbox" >&2; exit 3; }
+mkdir -p "\$p/bin" && cp "$brew" "\$p/bin/brew" && chmod +x "\$p/bin/brew"
+SH
+    exit 0 ;;
+  https://*/install.sh)
+    path=${url#https://}; dir=${path%/install.sh}
+    case "$dir" in */*) name=${dir##*/} ;; *) name=${dir%%.*} ;; esac
+    echo 'sb=${FAKE_STATE:+${FAKE_STATE%/state}}; case "$HOME/" in "$sb"/?*) ;; *) sb= ;; esac'
+    echo '[ -n "$sb" ] || { echo "fake installer: outside a sandbox" >&2; exit 3; }'
+    echo "echo \"installer $url\" >> \"\$FAKE_LOG\""
+    echo "mkdir -p \"\$HOME/.local/bin\""
+    if [ "$name" = claude ]; then
+      echo "cp \"$(cd "$(dirname "$0")/../fakeclaude" && pwd)/claude\" \"\$HOME/.local/bin/claude\""
+    else
+      echo "printf '#!/bin/sh\\necho \"$name \$*\" >> \"\$FAKE_LOG\"\\n' > \"\$HOME/.local/bin/$name\""
+    fi
+    echo "chmod +x \"\$HOME/.local/bin/$name\""
+    exit 0 ;;
+esac
+echo '{"token":"fake","artifacts":[{"app":["Fake.app"]}]}'

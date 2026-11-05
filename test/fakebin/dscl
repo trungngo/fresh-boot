@@ -1,0 +1,15 @@
+#!/bin/sh
+# Fake dscl (macOS accounts). `. -read /Users/<u> UserShell` prints $FAKE_STATE/shell.<u> (default
+# /bin/zsh, as on a fresh Mac); `. -create /Users/<u> UserShell <path>` records it; `. -read
+# /Groups/<g>` succeeds when $FAKE_STATE/group lists it.
+echo "dscl $*" >> "$FAKE_LOG"
+case "$2 $3" in
+  "-read /Users/"*)
+    u=${3#/Users/}
+    echo "UserShell: $(cat "$FAKE_STATE/shell.$u" 2>/dev/null || echo /bin/zsh)" ;;
+  "-create /Users/"*)
+    [ "$4" = UserShell ] && echo "$5" > "$FAKE_STATE/shell.${3#/Users/}" ;;
+  "-read /Groups/"*)
+    grep -q "^${3#/Groups/}:" "$FAKE_STATE/group" 2>/dev/null || exit 56 ;;
+  *) exit 1 ;;
+esac

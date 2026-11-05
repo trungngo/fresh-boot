@@ -1,0 +1,2 @@
+# Claude skill sync writes its runtime state into the linked ~/.claude/skills.
+skills/synced/

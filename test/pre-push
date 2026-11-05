@@ -1,0 +1,22 @@
+#!/bin/sh
+# Git pre-push hook: nothing personal and no secret leaves this machine.
+# Runs test/privacy-check.sh, and gitleaks over the working tree when it is installed.
+#
+# Install (once per clone):
+#   ln -sf ../../test/pre-push .git/hooks/pre-push
+#
+# Bypass in an emergency with `git push --no-verify` (then run both checks by hand).
+set -eu
+
+repo=$(git rev-parse --show-toplevel)
+cd "$repo"
+
+echo "pre-push: test/privacy-check.sh"
+test/privacy-check.sh || { echo "pre-push: privacy check failed; push aborted" >&2; exit 1; }
+
+if command -v gitleaks >/dev/null 2>&1; then
+  echo "pre-push: gitleaks"
+  gitleaks detect --source . --no-banner --redact || { echo "pre-push: gitleaks found something; push aborted" >&2; exit 1; }
+else
+  echo "pre-push: gitleaks not installed, skipped (brew install gitleaks)" >&2
+fi

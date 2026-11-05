@@ -1,0 +1,59 @@
+# yaml-language-server: $schema=https://github.com/trungngo/dot-cli/releases/latest/download/bundle.schema.json
+#
+# Node.js through fnm (Fast Node Manager): fnm itself from the package manager (macOS, Windows)
+# or its latest GitHub release (Linux), then the current LTS through fnm. See README.md.
+name: nodejs
+description: Node.js LTS via fnm
+requires: [common]
+provides: [node]
+
+steps:
+  # brew `fnm` / winget `Schniz.fnm` (dot.yml `packages:` maps the name).
+  - label: Install fnm
+    when: { os: [macos, windows] }
+    package: [fnm]
+
+  # Linux: the release zip fnm's own install script would fetch, straight into ~/.local/bin
+  # (on PATH via common). No script runs, so nothing can touch ~/.zshrc. The asset names carry
+  # no OS/arch pair dot could pick from, hence the explicit mapping.
+  - label: Install fnm (latest release)
+    when: { os: linux }
+    github_release:
+      repo: Schniz/fnm
+      asset:
+        linux/x86_64: fnm-linux.zip
+        linux/aarch64: fnm-arm64.zip
+
+  # `--lts` resolves the current LTS; fnm aliases it `lts-latest`, made the default here.
+  # `dot apply --upgrade` installs a newer LTS when there is one and moves the default to it
+  # (older versions stay installed: `fnm uninstall <version>` by hand).
+  - label: Install the latest Node LTS
+    when: { os: "!windows" }
+    shell:
+      cmd: fnm install --lts && fnm default lts-latest
+      unless: fnm list | grep -q lts-latest
+      upgrade: fnm install --lts && fnm default lts-latest
+
+  - label: Install the latest Node LTS
+    when: { os: windows }
+    shell:
+      cmd: fnm install --lts; if ($LASTEXITCODE -eq 0) { fnm default lts-latest }
+      unless: if (-not (fnm list | Select-String -Quiet 'lts-latest')) { exit 1 }
+      upgrade: fnm install --lts; if ($LASTEXITCODE -eq 0) { fnm default lts-latest }
+
+  # `fnm env --use-on-cd` (switch on cd, honouring .nvmrc / .node-version).
+  - label: Link the fnm shell integration
+    when: { os: "!windows" }
+    link:
+      ~/.config/zsh/conf.d/nodejs.zsh: nodejs.zsh
+
+  # PowerShell has no conf.d: a managed block in the current user's profile ($PROFILE), under
+  # the Documents known folder ({{ documents }} follows a OneDrive redirection).
+  - label: fnm in the PowerShell profile
+    when: { os: windows }
+    block:
+      file: "{{ documents }}/PowerShell/Microsoft.PowerShell_profile.ps1"
+      content: |
+        if (Get-Command fnm -ErrorAction SilentlyContinue) {
+          fnm env --use-on-cd --shell powershell | Out-String | Invoke-Expression
+        }

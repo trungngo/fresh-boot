@@ -1,0 +1,51 @@
+# yaml-language-server: $schema=https://github.com/trungngo/dot-cli/releases/latest/download/bundle.schema.json
+#
+# The GitHub CLI and its settings. No token anywhere: `gh auth login` stores credentials in the
+# system keyring (hosts.yml never lives here), and GH_TOKEN / GITHUB_TOKEN are never exported.
+# See README.md.
+name: gh
+description: GitHub CLI and ~/.config/gh/config.yml
+requires: [common]
+
+steps:
+  # Linked, not copied: gh rewrites config.yml in place through the symlink, so `gh alias set`
+  # and `gh config set` land in this repository.
+  - label: Link gh config.yml
+    when: { os: "!windows" }
+    link:
+      ~/.config/gh/config.yml: config.yml
+
+  - label: Link gh config.yml (Windows)
+    when: { os: windows }
+    link:
+      "{{ config_dir }}/GitHub CLI/config.yml": config.yml
+
+  - label: gh completion for zsh
+    when: { os: "!windows" }
+    link:
+      ~/.config/zsh/conf.d/gh.zsh: gh.zsh
+
+  # Debian/Ubuntu: GitHub's own apt repository, not Ubuntu's universe build (it lags by dozens
+  # of releases). Its keyring carries two primary keys (the current signing key and the one it
+  # rotated from): both are pinned, and any other key in the file is refused. The keyring and
+  # sources names are the ones GitHub's instructions (and the old install.sh) used; `replaces:`
+  # drops that one-line github-cli.list.
+  - label: GitHub CLI apt repository
+    package_repo:
+      name: github-cli
+      apt:
+        url: https://cli.github.com/packages
+        suites: stable
+        components: [main]
+        key: https://cli.github.com/packages/githubcli-archive-keyring.gpg
+        keyring: /etc/apt/keyrings/githubcli-archive-keyring.gpg
+        fingerprint:
+          - 7F38BBB59D064DBCB3D84D725612B36462313325
+          - 2C6106201985B60E6C7AC87323F3D4EA75716059
+        replaces: [/etc/apt/sources.list.d/github-cli.list]
+
+  - label: Install gh
+    package:
+      apt: [gh]
+      brew: [gh]
+      winget: [GitHub.cli]

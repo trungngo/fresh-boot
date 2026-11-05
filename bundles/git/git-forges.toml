@@ -1,0 +1,31 @@
+# The public git forges tn knows (docs/tn.md §4.2, §7.5). Shipped by the git bundle and copied
+# to ~/.config/tn/conf.d/git-forges.toml. Your own namespaces (gh `owner`, bitbucket `path`), a
+# self-hosted GitLab (the `work` forge) and the people `tn git as` knows are PRIVATE: they come
+# from ~/.config/tn/conf.d/git-private.toml, a file you write by hand
+# (private.toml.example shows its shape; docs/private-overlay.md). ~/.config/tn/config.toml can
+# add forges or override keys. A forge key is what `tn repo clone <key>:<path>`,
+# `tn git remote add <key>`, a project's tn.toml `forge =` names. These replace
+# the old git-{remote,pull,sync,web}-<forge>.sh scripts. No token here: gh and glab keep their
+# credentials in the system keyring.
+#
+#   host    required               cli    gh | glab | none (clone through the CLI, auth checks)
+#   owner   default namespace      remote name `tn git remote add` gives the remote (default: key)
+#   path    "{group}/{repo}"       {group}: the project's tn.toml group, else owner, else project
+#   kind, ssh_url, https_url, clone, web: see docs/tn.md §4.2 (defaults fit these hosts)
+
+[forges.gh]
+host   = "github.com"
+cli    = "gh"
+remote = "github"
+
+[forges.gitlab]
+host   = "gitlab.com"
+cli    = "glab"
+# not "gitlab": that remote name has always meant the self-hosted GitLab (the `work` forge)
+remote = "gitlab-com"
+
+# No CLI: remotes over ssh. Your repositories' path template goes in git-private.toml.
+[forges.bitbucket]
+host   = "bitbucket.org"
+cli    = "none"
+remote = "bitbucket"

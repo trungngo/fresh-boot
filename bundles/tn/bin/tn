@@ -1,0 +1,16 @@
+#!/usr/bin/env python3
+import os, sys
+from pathlib import Path
+if sys.version_info < (3, 11):
+    sys.stderr.write("tn: needs Python 3.11 or later (this is %d.%d)\n  run: dot apply common\n"
+                     % sys.version_info[:2])
+    sys.exit(3)
+home = Path(os.environ.get("TN_HOME") or Path.home() / ".local/share/tn")
+# Bytecode goes to the cache, never next to the copied sources: dot owns ~/.local/share/tn, and
+# a __pycache__ there would be drift it copies over and a leftover `dot remove` cannot see.
+if sys.pycache_prefix is None:
+    cache = os.environ.get("XDG_CACHE_HOME")
+    sys.pycache_prefix = str((Path(cache) if cache else Path.home() / ".cache") / "tn" / "pycache")
+sys.path.insert(0, str(home / "lib"))
+from tn.cli import main
+sys.exit(main())

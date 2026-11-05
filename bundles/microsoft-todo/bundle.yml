@@ -1,0 +1,41 @@
+# yaml-language-server: $schema=https://github.com/trungngo/dot-cli/releases/latest/download/bundle.schema.json
+#
+# Microsoft To Do. Only the app stores carry it: the Mac App Store (through `mas`, a Homebrew
+# formula) and the Microsoft Store (through winget's msstore source). There is no Linux app:
+# use https://to-do.office.com. Nothing is linked: lists sync with your Microsoft account.
+# See README.md.
+name: microsoft-todo
+description: Microsoft To Do (macOS and Windows)
+requires: [common]
+# macOS is off for now: `mas get` waits forever for an App Store prompt that only shows on
+# the Mac's screen (it hung a `dot apply --host` run). Put macos back here to turn it on again.
+when: { role: desktop, os: [windows] }
+
+steps:
+  # No Homebrew cask exists (Microsoft publishes To Do only to the App Store); dot has no App
+  # Store manager, so `mas` gets it. `mas get` is mas's command for free apps (`purchase` is its
+  # old alias; `install` only re-installs apps the account already has). It needs root (sudo,
+  # asked up front by dot) and an Apple Account signed in to the App Store. DOT_SYSROOT is unset
+  # on a real machine; the sandbox sets it so the check looks inside the sandbox, not the host.
+  - label: Install mas (Mac App Store CLI)
+    when: { os: macos }
+    package:
+      brew: [mas]
+
+  - label: Install Microsoft To Do (Mac App Store)
+    when: { os: macos }
+    shell:
+      cmd: mas get 1274495053
+      unless: test -d "${DOT_SYSROOT:-}/Applications/Microsoft To Do.app"
+      upgrade: mas update 1274495053
+      sudo: true
+
+  # 9NBLGGH5R558 is the Microsoft Store product (package family Microsoft.Todos_8wekyb3d8bbwe).
+  # dot's winget `package` items take no source, so the source is named here. `winget list`
+  # exits 0 when the package is installed and APPINSTALLER_CLI_ERROR_NO_APPLICATIONS_FOUND when
+  # it is not.
+  - label: Install Microsoft To Do (Microsoft Store)
+    when: { os: windows }
+    shell:
+      cmd: winget install --id 9NBLGGH5R558 --source msstore --exact --accept-package-agreements --accept-source-agreements --disable-interactivity
+      unless: winget list --id 9NBLGGH5R558 --source msstore --exact --accept-source-agreements --disable-interactivity | Out-Null; exit $LASTEXITCODE

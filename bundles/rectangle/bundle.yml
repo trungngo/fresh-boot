@@ -1,0 +1,23 @@
+# yaml-language-server: $schema=https://github.com/trungngo/dot-cli/releases/latest/download/bundle.schema.json
+#
+# Rectangle: move and snap windows with keyboard shortcuts. The free build from rectangleapp.com,
+# installed from its Homebrew cask. macOS only. Nothing is linked: its settings live in the app's
+# own preferences. See README.md.
+name: rectangle
+description: Rectangle, window snapping and shortcuts (macOS)
+requires: [common]
+when: { os: macos }
+
+steps:
+  - label: Install Rectangle
+    package:
+      cask: [rectangle]
+
+  # Rectangle's "Launch at login" preference (its key in the app's defaults), so it starts with
+  # the Mac and its shortcuts are ready. The app then registers itself as a login item.
+  - label: Rectangle starts at login
+    macos_defaults:
+      domain: com.knollsoft.Rectangle
+      key: LaunchOnLogin
+      type: bool
+      value: true

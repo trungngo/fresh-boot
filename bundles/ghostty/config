@@ -1,0 +1,44 @@
+# Ghostty configuration.
+#
+# Docs:        https://ghostty.org/docs/config
+# All options: ghostty +show-config --default --docs
+# All themes:  ghostty +list-themes
+
+font-size = 17
+
+# On `ssh` to a host that lacks Ghostty's terminfo entry, install it there first (into the
+# remote ~/.terminfo, through Ghostty's shell integration). Without it the remote shell and
+# full-screen programs mis-handle keys, paste and completion.
+shell-integration-features = ssh-terminfo
+
+# Equivalent of kitty's `tab_bar_style hidden`.
+window-show-tab-bar = never
+
+# Splits — leader is ctrl+space, standing in for vim's <Leader> (space),
+# which cannot lead in a terminal. Mirrors bundles/tmux/tmux.conf and
+# bundles/vim/ideavimrc so the same keys work everywhere.
+
+# Navigate, as in tmux's prefix h/j/k/l
+keybind = ctrl+space>h=goto_split:left
+keybind = ctrl+space>j=goto_split:down
+keybind = ctrl+space>k=goto_split:up
+keybind = ctrl+space>l=goto_split:right
+
+# Resize, as in tmux's prefix H/J/K/L
+keybind = ctrl+space>shift+h=resize_split:left,100
+keybind = ctrl+space>shift+j=resize_split:down,200
+keybind = ctrl+space>shift+k=resize_split:up,200
+keybind = ctrl+space>shift+l=resize_split:right,100
+
+# Split right (<Leader>\ and <Leader>v) and down (<Leader>-)
+keybind = ctrl+space>\=new_split:right
+keybind = ctrl+space>v=new_split:right
+keybind = ctrl+space>-=new_split:down
+
+# <Tab> moves to the next split
+keybind = ctrl+space>tab=goto_split:next
+
+# <Leader>z zen mode, <Leader>q hide panels, <Leader>r reload
+keybind = ctrl+space>z=toggle_split_zoom
+keybind = ctrl+space>q=close_surface
+keybind = ctrl+space>r=reload_config

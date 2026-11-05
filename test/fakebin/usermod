@@ -1,0 +1,8 @@
+#!/bin/sh
+# Fake usermod: `-s SHELL USER` records the login shell getent reports; `-aG GROUP USER` appends
+# the user to the group in $FAKE_STATE/group.
+echo "usermod $*" >> "$FAKE_LOG"
+case "$1" in
+  -s) echo "$2" > "$FAKE_STATE/shell.$3" ;;
+  -aG) echo "$2:x:1001:$3" >> "$FAKE_STATE/group" ;;
+esac

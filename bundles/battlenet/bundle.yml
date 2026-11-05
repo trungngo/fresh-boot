@@ -1,0 +1,13 @@
+# yaml-language-server: $schema=https://github.com/trungngo/dot-cli/releases/latest/download/bundle.schema.json
+#
+# Battle.net, Blizzard's game launcher: winget on Windows. Windows only (for now) and opt-in:
+# no profile selects it (`dot apply battlenet`). See README.md.
+name: battlenet
+description: Battle.net game launcher (Windows, opt-in)
+requires: [common]
+when: { os: windows, role: desktop }
+
+steps:
+  - label: Install Battle.net
+    package:
+      winget: [Blizzard.BattleNet]

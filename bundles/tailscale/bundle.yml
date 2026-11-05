@@ -1,0 +1,50 @@
+# yaml-language-server: $schema=https://github.com/trungngo/dot-cli/releases/latest/download/bundle.schema.json
+#
+# Tailscale, the WireGuard-based mesh VPN: Tailscale's own apt repository on Linux, the cask on
+# macOS, winget on Windows. Desktops and servers alike. Opt-in: no profile selects it
+# (`dot apply tailscale`). Joining the tailnet is a one-time login per machine, left to the
+# user (`sudo tailscale up`). Why and gotchas: README.md.
+name: tailscale
+description: Tailscale mesh VPN
+requires: [common]
+
+steps:
+  # Tailscale's own repository, not a distribution build (Ubuntu ships none). One signing key
+  # for every distribution and release; the keyring and sources names are the ones Tailscale's
+  # instructions use, so a machine set up by hand converges.
+  - label: Tailscale apt repository (Ubuntu)
+    when: { os: linux, distro: ubuntu }
+    package_repo:
+      name: tailscale
+      apt:
+        url: https://pkgs.tailscale.com/stable/ubuntu
+        suites: "{{ codename }}"
+        fallback_suite: noble
+        components: [main]
+        key: https://pkgs.tailscale.com/stable/ubuntu/noble.noarmor.gpg
+        keyring: /usr/share/keyrings/tailscale-archive-keyring.gpg
+        fingerprint: 2596A99EAAB33821893C0A79458CA832957F5868
+        replaces: [/etc/apt/sources.list.d/tailscale.list]
+
+  - label: Tailscale apt repository (Debian)
+    when: { os: linux, distro: debian }
+    package_repo:
+      name: tailscale
+      apt:
+        url: https://pkgs.tailscale.com/stable/debian
+        suites: "{{ codename }}"
+        fallback_suite: bookworm
+        components: [main]
+        key: https://pkgs.tailscale.com/stable/debian/bookworm.noarmor.gpg
+        keyring: /usr/share/keyrings/tailscale-archive-keyring.gpg
+        fingerprint: 2596A99EAAB33821893C0A79458CA832957F5868
+        replaces: [/etc/apt/sources.list.d/tailscale.list]
+
+  # The .deb enables and starts tailscaled itself. macOS: `tailscale-app` is the standalone app
+  # (a .pkg, so `sudo installer` runs: it needs a terminal); the `tailscale` formula would be the
+  # CLI daemon alone.
+  - label: Install Tailscale
+    package:
+      apt: [tailscale]
+      cask: [tailscale-app]
+      winget: [Tailscale.Tailscale]

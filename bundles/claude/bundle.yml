@@ -1,0 +1,86 @@
+# yaml-language-server: $schema=https://github.com/trungngo/dot-cli/releases/latest/download/bundle.schema.json
+#
+# Claude Code (the CLI, every profile), Claude Desktop (desktops only), the skills in
+# skills/, linked to ~/.claude/skills, and the tn plugin (`tn claude start|ls|attach|stop|login`:
+# sessions in tmux, for Remote Control; docs/tn.md §7.2). Why and gotchas: README.md.
+name: claude
+description: Claude Code CLI, Claude Desktop, ~/.claude/skills and `tn claude`
+requires: [common, tn, projects]
+
+steps:
+  # The official installer puts everything under $HOME (~/.local/share/claude, and a
+  # ~/.local/bin/claude link: on PATH via common) and updates itself. It refuses to run under
+  # sudo (it would install into root's home), so this step never has `sudo:`.
+  - label: Install Claude Code
+    when: { os: [linux, macos] }
+    shell:
+      cmd: curl -fsSL https://claude.ai/install.sh | bash
+      unless: command -v claude
+      upgrade: claude update
+
+  - label: Install Claude Code
+    when: { os: windows }
+    shell:
+      cmd: irm https://claude.ai/install.ps1 | iex
+      unless: if (-not (Get-Command claude -ErrorAction SilentlyContinue)) { exit 1 }
+      upgrade: claude update
+
+  # `tn claude ...`. Copied, never linked (as every tn plugin): the command keeps working while
+  # this checkout moves or is mid-edit. tests/ is never copied. The sessions need tmux, which
+  # this bundle does not pull in (servers and desktops select the tmux bundle; Windows has none):
+  # `tn claude start` says `run: dot apply tmux` when it is missing.
+  - label: Copy the tn plugin
+    copy:
+      ~/.local/share/tn/plugins/claude.py: plugin.py
+
+  # Skills are tracked config. Only this subdirectory: ~/.claude itself holds runtime state
+  # (sessions, projects, caches, credentials) that must never be linked into git. Claude's skill
+  # sync writes skills/synced/ into the linked directory: ignored by this bundle's .gitignore.
+  - label: Link ~/.claude/skills
+    link:
+      ~/.claude/skills: skills
+
+  # Claude Desktop on Linux (beta): Ubuntu 22.04+ / Debian 12+, amd64 and arm64 only. From the
+  # apt repository, not a downloaded .deb: the Linux app does not update itself.
+  #
+  # The package's install script adds its own claude-desktop.list for the same repository,
+  # signed by another keyring; two entries with different Signed-By make apt refuse to read
+  # ANY source, so every later apt install fails. The package's documented opt-out, set before
+  # it is installed, keeps it from doing that; `replaces:` drops a .list already there.
+  - label: Claude Desktop must not add its own apt source
+    when: { os: linux, role: desktop, arch: [x86_64, aarch64] }
+    block:
+      file: /etc/default/claude-desktop
+      root: true
+      content: |
+        CLAUDE_DESKTOP_ADD_REPO="false"
+
+  - label: Claude Desktop apt repository
+    when: { os: linux, role: desktop, arch: [x86_64, aarch64] }
+    package_repo:
+      name: claude-desktop
+      apt:
+        url: https://downloads.claude.ai/claude-desktop/apt/stable
+        suites: stable
+        key: https://downloads.claude.ai/claude-desktop/key.asc
+        fingerprint: 31DDDE24DDFAB679F42D7BD2BAA929FF1A7ECACE
+        replaces: [/etc/apt/sources.list.d/claude-desktop.list]
+
+  - label: Remove the old Claude Desktop keyring
+    when: { os: linux, role: desktop }
+    absent:
+      /usr/share/keyrings/claude-desktop-archive-keyring.asc: { root: true }
+
+  - label: Install Claude Desktop
+    when: { role: desktop }
+    package:
+      apt: [claude-desktop]
+      cask: [claude]
+      winget: [Anthropic.Claude]
+
+  # Cowork runs tasks in a QEMU/KVM VM: it needs the kvm group for /dev/vhost-vsock (group-gated
+  # even where /dev/kvm is not). Takes effect at the next login.
+  - label: kvm group for Cowork
+    when: { os: linux, role: desktop, arch: [x86_64, aarch64] }
+    user:
+      groups: [kvm]

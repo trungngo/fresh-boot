@@ -1,0 +1,52 @@
+# yaml-language-server: $schema=https://github.com/trungngo/dot-cli/releases/latest/download/bundle.schema.json
+#
+# The GitLab CLI. Login is interactive (`glab auth login`, a browser OAuth flow or a token you
+# paste), skipped once glab is logged in; no token is ever stored in this repository or exported
+# into shells, and GITLAB_TOKEN is never set. For a self-hosted GitLab run
+# `glab auth login --hostname <host>` yourself. See README.md.
+name: glab
+description: GitLab CLI; interactive keyring login
+requires: [common]
+
+steps:
+  - label: glab completion for zsh
+    when: { os: "!windows" }
+    link:
+      ~/.config/zsh/conf.d/glab.zsh: glab.zsh
+
+  # By OS, not by the `pkg` fact: on a fresh Mac (and over --host) Homebrew is not on the
+  # starting PATH, so `pkg` is not `brew` yet when the run is planned; the common bundle
+  # installs it, and the step finds it when it runs. Each OS uses its own manager's entry.
+  - label: Install glab (Homebrew, winget)
+    when: { os: [macos, windows] }
+    package:
+      brew: [glab]
+      winget: [GLab.GLab]
+
+  # Debian/Ubuntu: GitLab publishes a .deb per release but no apt repository, and Ubuntu's own
+  # package is dozens of releases behind, so: the latest release's .deb from gitlab.com.
+  - label: Install glab (latest release .deb from gitlab.com)
+    when: { pkg: apt }
+    github_release:
+      source: gitlab
+      repo: gitlab-org/cli
+      package: glab
+
+  # --use-keyring is not glab's default: without it the token is written in plain text to
+  # ~/.config/glab-cli/config.yml. A server has no Secret Service to hold it, so there glab keeps
+  # it in that file (0600). The step needs a terminal (it prompts), hence `interactive`.
+  - label: Log in to gitlab.com
+    when: { os: "!windows" }
+    shell:
+      cmd: glab auth login{% if role != "server" %} --use-keyring{% endif %}
+      unless: glab auth status --hostname gitlab.com
+      interactive: true
+
+  # Windows (pwsh): the Credential Manager is the keyring. A glab that winget installed earlier
+  # in this run is found: dot re-reads PATH from the registry after a winget install.
+  - label: Log in to gitlab.com (Windows)
+    when: { os: windows }
+    shell:
+      cmd: glab auth login --use-keyring
+      unless: glab auth status --hostname gitlab.com
+      interactive: true

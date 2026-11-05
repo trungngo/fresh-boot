@@ -1,0 +1,44 @@
+#!/bin/sh
+# Fake Homebrew. Deliberately NOT in test/fakebin: a sandboxed mac starts without brew, as a
+# fresh Mac does, so common's "Install Homebrew" step runs. Its installer (fake curl serves it for
+# Homebrew's install.sh URL) copies this file to $FAKE_BREW_PREFIX/bin/brew, the sandbox's
+# {{ homebrew_prefix }} (test/sandbox.sh), which common's `path:` step then puts on PATH.
+#
+# `install --formula|--cask` records "<side>:<name>" in $FAKE_STATE/brew; a formula also gets an
+# executable stub $FAKE_BREW_PREFIX/bin/<name> (logs its argv), as real brew links its binaries
+# there, so steps that need an installed formula's binary (the zsh bundle's
+# `{{ homebrew_prefix }}/bin/zsh` login shell) find it inside the sandbox, never on the host.
+# Cask tokens rarely match their binaries' names (visual-studio-code -> code): no stub. Nor a
+# formula test/fakebin already fakes (git, curl; found through $DOT_PATH_FIRST): a stub that
+# answers every command with success would shadow that fake.
+echo "brew $*" >> "$FAKE_LOG"
+cmd=$1; shift
+case "$cmd" in
+  list)
+    side=$1; shift; rc=0
+    for p in "$@"; do
+      [ "$p" = --versions ] && continue
+      if grep -qxF -e "$side:$p" "$FAKE_STATE/brew" 2>/dev/null; then echo "$p 1.0"; else rc=1; fi
+    done
+    exit $rc ;;
+  install)
+    side=$1; shift
+    for p in "$@"; do
+      case "$p" in -*) continue ;; esac
+      echo "$side:$p" >> "$FAKE_STATE/brew"
+      if [ "$side" = --formula ] && [ -n "${FAKE_BREW_PREFIX:-}" ]; then
+        case "$FAKE_BREW_PREFIX" in "${FAKE_STATE%/state}"/*) ;; *)
+          echo "fake brew: FAKE_BREW_PREFIX outside the sandbox" >&2; exit 3 ;; esac
+        stub="$FAKE_BREW_PREFIX/bin/${p##*/}"
+        if [ -n "${DOT_PATH_FIRST:-}" ] && [ -x "$DOT_PATH_FIRST/${p##*/}" ]; then
+          :
+        elif [ ! -e "$stub" ]; then
+          mkdir -p "$FAKE_BREW_PREFIX/bin"
+          printf '#!/bin/sh\necho "%s $*" >> "$FAKE_LOG"\n' "${p##*/}" > "$stub"
+          chmod +x "$stub"
+        fi
+      fi
+    done ;;
+  outdated) echo '{"formulae":[],"casks":[]}' ;;
+esac
+exit 0

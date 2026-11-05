@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=bb
+Comment=The IDE that builds itself
+Exec={{ home }}/.local/share/bb/bb.AppImage --appimage-extract-and-run %U
+Icon=utilities-terminal
+Terminal=false
+Categories=Development;IDE;

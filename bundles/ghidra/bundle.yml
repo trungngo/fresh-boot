@@ -1,0 +1,69 @@
+# yaml-language-server: $schema=https://github.com/trungngo/dot-cli/releases/latest/download/bundle.schema.json
+#
+# Ghidra, the NSA's software reverse engineering suite. Linux and Windows: the official zip from
+# the latest GitHub release of NationalSecurityAgency/ghidra (one archive for every platform),
+# run by the java bundle's Temurin JDK; macOS: the Homebrew formula. Opt-in: no profile selects
+# it (`dot apply ghidra`). See README.md.
+name: ghidra
+description: Ghidra reverse engineering suite (opt-in)
+requires: [common, java]
+
+steps:
+  # macOS: Homebrew packages Ghidra as a formula (there is no cask); it puts ghidraRun on PATH.
+  - label: Install Ghidra
+    when: { os: macos }
+    package:
+      brew: [ghidra]
+
+  # The release zip holds one top directory, ghidra_<version>_PUBLIC, stripped so the install
+  # path does not change between versions; the whole tree is replaced on an update and checked
+  # against the release's published digest. No version anywhere: the asset glob matches
+  # whatever the latest release carries.
+  - label: Install Ghidra (latest release)
+    when: { os: linux }
+    download:
+      release:
+        repo: NationalSecurityAgency/ghidra
+        asset: "ghidra_*_PUBLIC_*.zip"
+      dest: ~/.local/share/ghidra
+      extract: zip
+      strip: 1
+      replace: true
+      bin: [ghidraRun]
+
+  - label: Install Ghidra (latest release)
+    when: { os: windows }
+    download:
+      release:
+        repo: NationalSecurityAgency/ghidra
+        asset: "ghidra_*_PUBLIC_*.zip"
+      dest: "{{ localappdata }}/ghidra"
+      extract: zip
+      strip: 1
+      replace: true
+
+  # So the GUI shows up in the desktop's launcher. Desktop entries do not expand `~`.
+  - label: Ghidra desktop entry
+    when: { os: linux, role: desktop }
+    template:
+      ~/.local/share/applications/ghidra.desktop: ghidra.desktop
+
+  # Windows: a Start menu shortcut to ghidraRun.bat (minimised: the batch file only starts the
+  # Java GUI). Written by the shell's own COM object; recreated if it is removed.
+  - label: Ghidra Start menu shortcut (Windows)
+    when: { os: windows }
+    shell:
+      prelude: |
+        $lnk = "{{ appdata }}\Microsoft\Windows\Start Menu\Programs\Ghidra.lnk"
+        $dir = "{{ localappdata }}\ghidra"
+      cmd: |
+        $s = (New-Object -ComObject WScript.Shell).CreateShortcut($lnk)
+        $s.TargetPath = "$dir\ghidraRun.bat"
+        $s.WorkingDirectory = $dir
+        $s.IconLocation = "$dir\support\ghidra.ico"
+        $s.WindowStyle = 7
+        $s.Save()
+      unless: |
+        if (-not (Test-Path -LiteralPath $lnk)) { exit 1 }
+        $s = (New-Object -ComObject WScript.Shell).CreateShortcut($lnk)
+        if ($s.TargetPath -eq "$dir\ghidraRun.bat") { exit 0 } else { exit 1 }

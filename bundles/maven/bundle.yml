@@ -1,0 +1,15 @@
+# yaml-language-server: $schema=https://github.com/trungngo/dot-cli/releases/latest/download/bundle.schema.json
+#
+# Apache Maven from the package manager (opt-in: `dot apply maven`). It requires java, so the
+# Temurin JDK is in place first and apt's `default-jre-headless | java-runtime-headless`
+# dependency is met by it instead of pulling in a second (OpenJDK) runtime. See README.md.
+name: maven
+description: Maven from apt / Homebrew (opt-in)
+requires: [common, java]
+when: { os: [linux, macos] }
+
+steps:
+  - label: Install Maven
+    package:
+      apt: [maven]
+      brew: [maven]

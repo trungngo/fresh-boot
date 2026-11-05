@@ -1,0 +1,22 @@
+#!/bin/sh
+# Fake VS Code CLI. Extensions are the lines of $FAKE_STATE/code-ext. Tunnel: logged in only when
+# $FAKE_STATE/code-login exists (touch it to simulate `code tunnel user login`); `tunnel service
+# install` creates $FAKE_STATE/code-tunnel, which `tunnel status` then reports.
+echo "code $*" >> "$FAKE_LOG"
+case "$1" in
+  --list-extensions) cat "$FAKE_STATE/code-ext" 2>/dev/null; exit 0 ;;
+  --install-extension)
+    while [ $# -gt 0 ]; do [ "$1" = --install-extension ] && echo "$2" >> "$FAKE_STATE/code-ext"; shift; done
+    exit 0 ;;
+  --version) echo "1.0.0"; exit 0 ;;
+  tunnel)
+    case "$2 $3" in
+      "user show") [ -e "$FAKE_STATE/code-login" ] && { echo "logged in"; exit 0; }; echo "not logged in"; exit 1 ;;
+      "status "*|"status ")
+        if [ -e "$FAKE_STATE/code-tunnel" ]; then echo '{"tunnel":null,"service_installed":true}'
+        else echo '{"tunnel":null,"service_installed":false}'; fi
+        exit 0 ;;
+      "service install") touch "$FAKE_STATE/code-tunnel"; exit 0 ;;
+    esac ;;
+esac
+exit 0

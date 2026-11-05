@@ -1,0 +1,8 @@
+#!/bin/sh
+# Fake mas: logs its argv; `get 1274495053` (or its alias `purchase`) makes Microsoft To Do.app
+# under $DOT_SYSROOT/Applications, where the microsoft-todo bundle's `unless` looks in the sandbox.
+echo "mas $*" >> "$FAKE_LOG"
+case "$1 $2" in
+  "get 1274495053"|"purchase 1274495053") mkdir -p "${DOT_SYSROOT:?}/Applications/Microsoft To Do.app" ;;
+esac
+exit 0

@@ -1,0 +1,68 @@
+# yaml-language-server: $schema=https://github.com/trungngo/dot-cli/releases/latest/download/bundle.schema.json
+#
+# Python through uv (Astral): uv itself (its latest GitHub release on Linux, Homebrew on macOS),
+# then the newest stable CPython as uv's managed default, with `python3` / `python` in
+# ~/.local/bin. No compiler and no build dependencies: uv installs prebuilt CPython
+# (python-build-standalone). Also a tn plugin with one doctor check (uv installed).
+# See README.md.
+name: python
+description: Python via uv (latest stable CPython as python3)
+requires: [common, tn]
+provides: [python]
+when: { os: [linux, macos] }
+
+steps:
+  # The release tarball (uv + uvx in one directory named after the target) straight into
+  # ~/.local/bin, on PATH via common. The glibc build: every supported Ubuntu is new enough.
+  - label: Install uv (latest release)
+    when: { os: linux }
+    github_release:
+      repo: astral-sh/uv
+      asset:
+        linux/x86_64: uv-x86_64-unknown-linux-gnu.tar.gz
+        linux/aarch64: uv-aarch64-unknown-linux-gnu.tar.gz
+      bin: [uv, uvx]
+
+  - label: Install uv (Homebrew)
+    when: { os: macos }
+    package:
+      brew: [uv]
+
+  # The old repo symlinked ~/.pyenv into a vendored submodule of itself; that link dangles once
+  # the old checkout goes. Only a symlink is removed, never a real ~/.pyenv with its versions
+  # (delete that by hand once nothing uses it).
+  - label: Retire a legacy ~/.pyenv symlink
+    absent:
+      ~/.pyenv: { only: link }
+
+  # The newest stable CPython minor that this uv knows (its download list is built in, so a
+  # newer minor appears after uv itself is upgraded): the strict x.y.z match skips prereleases
+  # (3.15.0a1, 3.15.0rc1) and the freethreaded builds. `--upgrade` with a minor request installs
+  # it, or moves it to its newest patch; `--default` also writes `python3` / `python` into uv's
+  # bin directory (~/.local/bin) pointing at it. `--default` is still a preview option: the
+  # preview feature is named so uv does not warn. The same command is the upgrade: a new minor
+  # becomes python3 (older ones stay: `uv python list --only-installed`, `uv python uninstall`).
+  - label: Install the latest CPython as python3
+    shell:
+      cmd: >-
+        v=$(uv python list --only-downloads --output-format json
+        | grep -o '"key":"cpython-3\.[0-9]*\.[0-9]*-' | cut -d- -f2 | sort -t. -k2,2n | tail -1)
+        && test -n "$v"
+        && uv python install --default --upgrade --preview-features python-install-default "${v%.*}"
+      unless: test -x "$(uv python dir --bin)/python3"
+      upgrade: >-
+        v=$(uv python list --only-downloads --output-format json
+        | grep -o '"key":"cpython-3\.[0-9]*\.[0-9]*-' | cut -d- -f2 | sort -t. -k2,2n | tail -1)
+        && test -n "$v"
+        && uv python install --default --upgrade --preview-features python-install-default "${v%.*}"
+
+  # uv / uvx completions. Nothing else: python3 is a plain executable in ~/.local/bin.
+  - label: Link the uv shell integration
+    link:
+      ~/.config/zsh/conf.d/python.zsh: python.zsh
+
+  # Copied, never linked (as every tn plugin): the command keeps working while this checkout
+  # moves or is mid-edit. tests/ is never copied.
+  - label: Copy the tn plugin
+    copy:
+      ~/.local/share/tn/plugins/python.py: plugin.py

@@ -1,0 +1,14 @@
+# yaml-language-server: $schema=https://github.com/trungngo/dot-cli/releases/latest/download/bundle.schema.json
+#
+# Evernote: notes, tasks and archive. The desktop app from its vendor: the Homebrew cask on macOS,
+# winget on Windows. Nothing is linked: the app keeps its own account and settings. See README.md.
+name: evernote
+description: Evernote, notes and archive (macOS and Windows)
+requires: [common]
+when: { os: [macos, windows] }
+
+steps:
+  - label: Install Evernote
+    package:
+      cask: [evernote]
+      winget: [Evernote.Evernote]

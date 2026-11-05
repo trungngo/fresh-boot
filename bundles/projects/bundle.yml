@@ -1,0 +1,15 @@
+# yaml-language-server: $schema=https://github.com/trungngo/dot-cli/releases/latest/download/bundle.schema.json
+#
+# projects: the tn plugin for the project layout convention (CLAUDE.md): `tn proj`, `tn repo`,
+# `tn ws` and `tn cd`, plus the Python API the claude, codex and git plugins import
+# (docs/tn.md §7.1). No packages: git comes from common, tn from the tn bundle. See README.md.
+name: projects
+description: "tn plugin: projects, repos, parallel workspaces and tn cd"
+requires: [common, tn]
+
+steps:
+  # Copied, never linked (as every tn plugin): the command keeps working while this checkout
+  # moves or is mid-edit. tests/ is never copied.
+  - label: Copy the tn plugin
+    copy:
+      ~/.local/share/tn/plugins/projects.py: plugin.py

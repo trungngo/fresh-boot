@@ -1,0 +1,20 @@
+#!/bin/sh
+# Fake apt-cache: `policy` says every package has candidate 2.0; `pkgnames <prefix>` lists the
+# names starting with it from $FAKE_STATE/pkgnames, else from a few archive names the bundles'
+# package patterns match (dotnet-sdk-*).
+echo "apt-cache $*" >> "$FAKE_LOG"
+case "$1" in
+  policy)
+    shift
+    for p in "$@"; do
+      echo "$p:"
+      if grep -qxF -e "$p" "$FAKE_STATE/apt" 2>/dev/null; then echo "  Installed: 2.0"; else echo "  Installed: (none)"; fi
+      echo "  Candidate: 2.0"
+    done ;;
+  pkgnames)
+    { cat "$FAKE_STATE/pkgnames" 2>/dev/null ||
+        printf '%s\n' dotnet-sdk-8.0 dotnet-sdk-9.0 dotnet-sdk-10.0 \
+          dotnet-sdk-10.0-source-built-artifacts dotnet-sdk-aot-10.0 dotnet-sdk-dbg-10.0; } |
+      while read -r n; do case "$n" in "${2:-}"*) echo "$n" ;; esac; done ;;
+esac
+exit 0

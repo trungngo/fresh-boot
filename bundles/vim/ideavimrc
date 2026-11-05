@@ -1,0 +1,311 @@
+" Plugins
+"   Case Conversion
+"       https://plugins.jetbrains.com/plugin/10985-case-conversion
+" Design
+" -----------------------------------------------------------------------------
+" <Leader>
+"   r: Reload vimrc
+"
+"   t: Theme
+"
+"   Windows - the same keys the terminals use after their prefix, so tmux,
+"   ghostty, vim, IDEA, VS Code and Zed all agree. See docs/keymap.md
+"   in this repository.
+"       v, \\: split right
+"          -: split down
+"       hjkl: focus left/down/up/right
+"       HJKL: resize
+"        tab: next split
+"          z: zoom the split
+"          q: close the split
+"
+"   p: Preview / split-editor view
+"       p1: editor only
+"       p2: editor and preview
+"       p3: preview only
+"
+"   w: Windows, everything that is not movement
+"       wp: Recent projects
+"       ws: Switcher
+"       wq: Hide all panels
+"       wz: Zen mode
+"
+"   a: Quick List Action
+"
+"   c: Code Formatting
+"       cf: Reformat Code
+"       co: Optimize Imports
+"       cp: Code Push
+"       c"
+"
+"   e: Refactoring - Extract
+"
+"   i: Refactoring - Introduce
+"
+"   m: Refactoring - Move
+"
+"   r: Refactoring - Rename
+"
+"   n: Generate
+"
+"   s: File Structure Popup
+"
+"   g: Goto
+"       gs: Goto Symbols
+"       ga: Goto Action
+"       gc: Goto Class
+"       gf: Goto File
+"       gr: Goto Related
+"       gd: Goto Declaration
+"
+"   b: Build & Run
+"
+"   f: Find
+"       ff: Find in current file
+"       fa: Find in path
+"       fu: Find Usages
+" 
+" -----------------------------------------------------------------------------
+
+" See: https://github.com/JetBrains/ideavim
+" See: https://gist.github.com/lpld/8dc1c6f3e942c5685f65566756ca7d27
+let mapleader=' '
+
+set visualbell
+set noerrorbells
+set ignorecase smartcase
+set showmode
+
+" Needs to set to zero because an issue with Pycharm, Jupiter
+" Better settings is 5
+set scrolloff=0
+
+set history=1000
+set incsearch
+set smartcase
+
+set hlsearch
+
+set relativenumber
+
+" Needs to install easy motion plugin.
+" https://github.com/AlexPl292/IdeaVim-EasyMotion
+" Documentation: https://github.com/easymotion/vim-easymotion/blob/master/doc/easymotion.txt
+
+" This must go after mapleader is set
+Plug 'easymotion/vim-easymotion'
+set easymotion
+" No prefix override: IdeaVim-EasyMotion defaults to <Leader><Leader>, and
+" VSCodeVim hardcodes the same. Leaving both on the default keeps them in sync
+" at <Space><Space>.
+
+" Enable vim-surround plugin
+" https://github.com/tpope/vim-surround
+Plug 'tpope/vim-surround'
+set surround
+
+" Enable multiple cursors plugin
+Plug 'terryma/vim-multiple-cursors'
+set multiple-cursors
+
+" Documentation:
+"   https://github.com/tpope/vim-commentary/blob/master/doc/commentary.txt
+Plug 'vim-commentary'
+set commentary
+
+" Reloads ideavimrc
+nnoremap <Leader>r :source ~/.ideavimrc<CR>
+
+" All yanks and puts use the system clipboard, so no explicit "+ maps are
+" needed. ideaput keeps the IDE's own paste implementation (reformatting,
+" import insertion) rather than a raw text insert.
+set clipboard=unnamedplus,ideaput
+
+" Splitting Windows
+nnoremap <Leader>\ :vsplit<CR>
+nnoremap <Leader>v :vsplit<CR>
+nnoremap <Leader>- :split<CR>
+
+" Important: :actionlist [pattern] to find any idea action
+
+
+" Tab
+" ===========
+" Next Tab
+" nnoremap <C-Tab> gt
+
+" Previous Tab
+" nnoremap <S-Tab> gT
+
+" Windows 
+" =========
+
+" Toggle zen mode
+nnoremap <Leader>wz :action ToggleDistractionFreeMode<CR>
+
+" Hide open panels
+nnoremap <Leader>wq :action HideAllWindows<CR>
+
+nnoremap <Leader>wp :action ManageRecentProjects<CR>
+nnoremap <Leader>ws :action Switcher<CR>
+
+" Moves to the next split window
+nnoremap <Tab> <C-W><C-W>
+nnoremap <Leader><Tab> :action MoveEditorToOppositeTabGroup<CR>
+
+" Move between splits. Bare hjkl, matching the terminals' <prefix> hjkl.
+nnoremap <Leader>h <C-W><C-h>
+nnoremap <Leader>j <C-W><C-j>
+nnoremap <Leader>k <C-W><C-k>
+nnoremap <Leader>l <C-W><C-l>
+
+" Resize the split
+nnoremap <Leader>H :action StretchSplitToLeft<CR>
+nnoremap <Leader>J :action StretchSplitToBottom<CR>
+nnoremap <Leader>K :action StretchSplitToTop<CR>
+nnoremap <Leader>L :action StretchSplitToRight<CR>
+
+" Zoom the split, and close it
+nnoremap <Leader>z :action MaximizeEditorInSplit<CR>
+nnoremap <Leader>q :action CloseContent<CR>
+
+" Find 
+" =========
+
+" Find in current file
+nnoremap <Leader>ff :action Find<CR> 
+
+" Find in project
+nnoremap <Leader>fa :action FindInPath<CR> 
+
+" Find usages
+nnoremap <Leader>fu :action FindUsages<CR> 
+
+
+"Coding Formatting
+" ===============
+
+
+" Changes theme
+nnoremap <Leader>t :action ChangeColorScheme<CR>
+
+" Refactor popup
+nnoremap <Leader>a :action Refactorings.QuickListPopupAction<CR>
+
+" Refactor code
+nnoremap <leader>cf :action ReformatCode<CR>
+
+" Optimizes imports
+nnoremap <Leader>co :action OptimizeImports<CR>
+
+" Code Push
+nnoremap <Leader>cp :action Git.Commit.Stage<CR>
+
+nnoremap <Leader>cg :action me.laria.code.idea_caseconv.CamelCaseAction<CR>
+
+" Refactoring - Extract
+vnoremap <Leader>em :action ExtractMethod<CR>
+nnoremap <Leader>em :action ExtractMethod<CR>
+nnoremap <Leader>ei :action ExtractInterface<CR>
+nnoremap <Leader>ec :action ExtractClass<CR>
+nnoremap <Leader>es :action ExtractSuperclass<CR>
+
+" Refactoring - Introduce
+nnoremap <Leader>iv :action IntroduceVariable<CR>
+nnoremap <Leader>ic :action IntroduceConstant<CR>
+nnoremap <Leader>if :action IntroduceField<CR>
+nnoremap <Leader>ip :action IntroduceParameter<CR>
+
+" Refactoring - Move
+nnoremap <Leader>m :action Move<CR>
+
+" Refactoring - Rename
+nnoremap <Leader>ri :action Inline<CR>
+nnoremap <Leader>rr :action RenameElement<CR>i
+nnoremap <Leader>rj :action MemberPushDown<CR>
+nnoremap <Leader>rk :action MemberPullUp<CR>
+nnoremap <Leader>rs :action ChangeSignature<CR>
+nnoremap <Leader>rd :action SafeDelete<CR>
+nnoremap <Leader>rm :action Move<CR>
+nnoremap <Leader>rc :action CopyElement<CR>
+
+
+" Refactoring - Generates
+nnoremap <Leader>nm :action ImplementMethods<CR>
+nnoremap <Leader>no :action OverrideMethods<CR>
+
+
+" Font Size
+" ==============
+" Increase font size
+nnoremap = :action EditorIncreaseFontSize<CR>
+
+" Decrese font size
+nnoremap - :action EditorDecreaseFontSize<CR>
+
+
+" Goto
+" ==============
+
+" File Structure
+nnoremap <Leader>s :action FileStructurePopup<CR>
+
+" Goto Symbol
+nnoremap <Leader>gs :action GotoSymbol<CR>
+
+" Goto Action
+nnoremap <Leader>ga :action GotoAction<CR>
+
+" Goto Class
+nnoremap <Leader>gc :action GotoClass<CR>
+
+" Goto File
+nnoremap <Leader>gf :action GotoFile<CR>
+
+" Goto Related
+nnoremap <Leader>gr :action GotoRelated<CR>
+
+" Goto Declaration
+nnoremap <Leader>gd :action GotoDeclaration<CR>
+
+nnoremap ge :action GotoNextError<CR>
+nnoremap ]e :action GotoNextError<CR>
+nnoremap [e :action GotoPreviousError<CR>
+
+" Build & Debug
+
+" build and debug actions
+nnoremap <Leader>br :action Run<CR>
+nnoremap <Leader>bc :action RunConfiguration<CR>
+nnoremap <Leader>ba :action RunAny<CR>
+nnoremap <Leader>bd :action Debug<CR>
+nnoremap <Leader>bb :action ToggleLineBreakpoint<CR>
+
+
+" Intent actions
+nnoremap <CR> :action ShowIntentionActions<CR>
+
+" Split-editor view modes. These are platform ToggleActions, so they work in
+" any editor with a preview pane, not just Markdown.
+nnoremap <Leader>p1 :action TextEditorWithPreview.Layout.EditorOnly<CR>
+nnoremap <Leader>p2 :action TextEditorWithPreview.Layout.EditorAndPreview<CR>
+nnoremap <Leader>p3 :action TextEditorWithPreview.Layout.PreviewOnly<CR>
+
+" ====================================
+
+" ctrl+c to toggle highlight.
+nnoremap <Leader>th :nohlsearch <CR>
+
+
+" ====================================
+" Jupyter Note Book
+" ====================================
+
+" Change cell type
+nnoremap <Leader>jc :action JupyterChangeCellType<CR>
+
+" Add a new code cell below
+nnoremap <Leader>jac :action JupyterAddCodeCellAction<CR>
+
+" Add a new markdown cell below
+nnoremap <Leader>jam :action JupyterAddMarkdownCellAction<CR>

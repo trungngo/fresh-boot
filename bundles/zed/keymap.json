@@ -1,0 +1,66 @@
+[
+  {
+    "context": "vim_mode == normal && !menu",
+    "bindings": {
+      "space \\": "pane::SplitRight",
+      "space v": "pane::SplitRight",
+      "space -": "pane::SplitDown",
+      "space w p": "projects::OpenRecent",
+      "space w s": "tab_switcher::Toggle",
+      "tab": "workspace::ActivateNextPane",
+      "space z": "workspace::ToggleEditorZoom",
+      "space q": "pane::CloseActiveItem",
+      "space s": "outline::Toggle",
+      "space a": "editor::ToggleCodeActions",
+      "space f f": "buffer_search::Deploy",
+      "space f a": "pane::DeploySearch",
+      "space f u": "editor::FindAllReferences",
+      "space g s": "project_symbols::Toggle",
+      "space g c": "project_symbols::Toggle",
+      "space g a": "command_palette::Toggle",
+      "space g f": "file_finder::Toggle",
+      "space g d": "editor::GoToDefinition",
+      "space g r": "editor::FindAllReferences",
+      "g e": "editor::GoToDiagnostic",
+      "] e": "editor::GoToDiagnostic",
+      "[ e": "editor::GoToPreviousDiagnostic",
+      "space c f": "editor::Format",
+      "space c o": "editor::OrganizeImports",
+      "space c p": "git::Commit",
+      "space r r": "editor::Rename",
+      "space b r": "task::Spawn",
+      "space b d": "debugger::Start",
+      "space b b": "editor::ToggleBreakpoint",
+      "space h": "workspace::ActivatePaneLeft",
+      "space j": "workspace::ActivatePaneDown",
+      "space k": "workspace::ActivatePaneUp",
+      "space l": "workspace::ActivatePaneRight",
+      "space shift-h": "vim::ResizePaneLeft",
+      "space shift-j": "vim::ResizePaneDown",
+      "space shift-k": "vim::ResizePaneUp",
+      "space shift-l": "vim::ResizePaneRight",
+      "space w q": "workspace::ToggleAllDocks",
+      "space w z": "workspace::ToggleCenteredLayout",
+      "space t": "theme_selector::Toggle",
+      "space t h": "buffer_search::Dismiss",
+      "=": "zed::IncreaseBufferFontSize",
+      "-": "zed::DecreaseBufferFontSize",
+      "space p 2": "markdown::OpenPreviewToTheSide",
+      "space p 3": "markdown::OpenPreview"
+    }
+  },
+  {
+    "context": "VimControl && !menu",
+    "bindings": {
+      "tab": "workspace::ActivateNextPane"
+    }
+  },
+  {
+    "bindings": {
+      "ctrl-=": "zed::IncreaseBufferFontSize",
+      "ctrl-+": "zed::IncreaseBufferFontSize",
+      "ctrl--": "zed::DecreaseBufferFontSize",
+      "ctrl-0": "zed::ResetBufferFontSize"
+    }
+  }
+]

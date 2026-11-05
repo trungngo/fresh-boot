@@ -1,0 +1,74 @@
+# yaml-language-server: $schema=https://github.com/trungngo/dot-cli/releases/latest/download/bundle.schema.json
+#
+# tn: the one helper command (docs/tn.md). The core library and the entry point are COPIED,
+# never linked, so the command keeps working while this checkout is moved or mid-edit; each
+# bundle copies its own plugin into ~/.local/share/tn/plugins/. Python 3.11+ comes from common.
+# See README.md.
+name: tn
+description: The tn helper command (Python core; one plugin per bundle)
+requires: [common]
+
+steps:
+  # dot's directory copy takes every file and ignores .gitignore, so a __pycache__ left in this
+  # checkout (any run with PYTHONPATH=bundles/tn/lib and bytecode on) would be copied to the
+  # machine as files dot owns. Remove it from the source first: it is untracked build output.
+  # On the machine tn never writes bytecode next to the copy (bin/tn, bin/tn.cmd put it under
+  # ~/.cache/tn/pycache), so the copy stays Satisfied after tn runs.
+  - label: Drop Python bytecode from the tn library source
+    when: { os: [linux, macos] }
+    shell:
+      cmd: find lib/tn -type d -name __pycache__ -prune -exec rm -rf {} +
+      unless: test -z "$(find lib/tn -type d -name __pycache__ -print)"
+
+  - label: Drop Python bytecode from the tn library source (Windows)
+    when: { os: windows }
+    shell:
+      cmd: Get-ChildItem lib/tn -Recurse -Directory -Force -Filter __pycache__ | Remove-Item -Recurse -Force
+      unless: if (Get-ChildItem lib/tn -Recurse -Directory -Force -Filter __pycache__) { exit 1 }
+
+  # The package `tn` (lib/tn, tn/plugins/__init__.py included). A directory copy: a file deleted
+  # here is pruned on the machine while it still holds what dot wrote. tests/ is never copied.
+  - label: Copy the tn library
+    copy:
+      ~/.local/share/tn/lib/tn: lib/tn
+
+  # ~/.local/bin is on PATH through common. Unix: a Python script (#!/usr/bin/env python3) that
+  # checks for 3.11+ before importing anything.
+  - label: Copy the tn command
+    when: { os: [linux, macos] }
+    copy:
+      ~/.local/bin/tn: { src: bin/tn, mode: "0755" }
+
+  # Windows: a batch shim that runs `py -3 -P -m tn` with PYTHONPATH at the library (-P: the
+  # current directory is not on sys.path, so a project's own tn.py is never imported).
+  - label: Copy the tn command (Windows)
+    when: { os: windows }
+    copy:
+      ~/.local/bin/tn.cmd: bin/tn.cmd
+
+  # The `tn` shell function (lets `tn cd`, `--cd` change the shell's directory) and completion.
+  - label: Link the tn shell integration
+    when: { os: "!windows" }
+    link:
+      ~/.config/zsh/conf.d/tn.zsh: tn.zsh
+
+  # PowerShell has no conf.d: a managed block in $PROFILE (see the nodejs bundle).
+  - label: tn in the PowerShell profile
+    when: { os: windows }
+    block:
+      file: "{{ documents }}/PowerShell/Microsoft.PowerShell_profile.ps1"
+      content: |
+        if (Get-Command tn.cmd -ErrorAction SilentlyContinue) {
+          tn.cmd shell init pwsh | Out-String | Invoke-Expression
+        }
+
+  # tn replaced the `scripts` bundle (docs/tn.md §8; no aliases for the old names). Machines set
+  # up by it keep ~/.scripts (a link to that bundle's bin/, on PATH) and its conf.d file (the
+  # mux-new / mux-kill functions, now `tn tmux new|kill`). Only links are removed; a real file
+  # or directory there is kept. ~/.config/scripts/local_db_password is left: delete it by hand
+  # (nothing reads it: `tn dj reset-password`, which replaced dj-pwd-reset.sh, was removed too).
+  - label: Retire the scripts bundle's links
+    when: { os: [linux, macos] }
+    absent:
+      ~/.scripts: { only: link }
+      ~/.config/zsh/conf.d/scripts.zsh: { only: link }

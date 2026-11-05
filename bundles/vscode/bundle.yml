@@ -1,0 +1,120 @@
+# yaml-language-server: $schema=https://github.com/trungngo/dot-cli/releases/latest/download/bundle.schema.json
+#
+# VS Code: the app, the settings/keybindings/snippets links (the sync mechanism: UI changes
+# write straight into this bundle), the extension set, the tunnel service, the devtunnel CLI,
+# and the tn plugin behind `tn tunnel` (port forwards). See README.md (the long "why" of every
+# setting and key).
+#
+# Not desktop-only: a headless server gets the `code` CLI, the tunnel service (vscode.dev
+# reaches the machine), devtunnel and `tn tunnel`, as the old repo's linux build did on every
+# host. Only the editor's own config (settings links, extensions) is `role: desktop`.
+name: vscode
+description: "VS Code: settings, keybindings, snippets, extensions, tunnel service, devtunnel, tn tunnel"
+requires: [common, tn]
+
+steps:
+  # Microsoft's repo, bootstrapped only: once installed, the `code` package maintains
+  # /etc/apt/sources.list.d/vscode.sources itself ("THIS FILE IS AUTOMATICALLY CONFIGURED"),
+  # hence `if_missing`, and the same keyring path it uses, so the two never disagree on
+  # Signed-By. Key: "Microsoft (Release signing)".
+  - label: Microsoft's VS Code apt repository
+    package_repo:
+      name: vscode
+      apt:
+        url: https://packages.microsoft.com/repos/code
+        suites: [stable]
+        components: [main]
+        key: https://packages.microsoft.com/keys/microsoft.asc
+        keyring: /usr/share/keyrings/microsoft.gpg
+        fingerprint: BC528686B50D79E339D3721CEB3E94ADBE1229CF
+        if_missing: true
+
+  - label: Install VS Code
+    package:
+      apt: [code]
+      cask: [visual-studio-code]
+      winget: [Microsoft.VisualStudioCode]
+
+  # Linked, not copied: VS Code rewrites these in place, so a UI change is a `git diff` here.
+  # {{ config_dir }} is ~/.config (Linux), ~/Library/Application Support (macOS), %APPDATA%.
+  - label: Link VS Code settings, keybindings and snippets
+    when: { role: desktop }
+    link:
+      "{{ config_dir }}/Code/User/settings.json": settings.json
+      "{{ config_dir }}/Code/User/keybindings.json": keybindings.json
+      "{{ config_dir }}/Code/User/snippets": snippets
+
+  # The tracked extension set (was extensions.txt). Installs what is missing; extras a machine
+  # carries are left alone. Re-record with `code --list-extensions`.
+  - label: VS Code extensions
+    when: { role: desktop }
+    package:
+      vscode:
+        - anthropic.claude-code
+        - ms-python.python
+        - ms-vscode.remote-server
+        - vscodevim.vim
+
+  # The tunnel as a background service (systemd --user on Linux, launchd on macOS; no sudo),
+  # so vscode.dev reaches this machine without a terminal held open. `code tunnel service
+  # install` writes its own unit, so this is not a `service:` step. Login is an interactive
+  # browser flow, never automated: `only_if` skips the step (saying why) until `code` is
+  # installed and `code tunnel user login` has been run once. Linger keeps the user service
+  # alive after logout and across reboots; it is non-fatal (some machines need a polkit prompt a
+  # provisioning run cannot answer). The status is captured, not piped into `grep -q`: under
+  # pipefail grep's early exit SIGPIPEs `code` and the test reads backwards.
+  - label: VS Code tunnel service
+    when: { os: [linux, macos] }
+    only_if: command -v code >/dev/null && code tunnel user show >/dev/null 2>&1
+    shell:
+      cmd: >-
+        code tunnel service install --accept-server-license-terms &&
+        { ! command -v loginctl >/dev/null ||
+          loginctl enable-linger "$USER" ||
+          echo "warning: could not enable linger; the tunnel stops when you log out" >&2; }
+      unless: >-
+        case "$(code tunnel status 2>/dev/null)" in
+        *'"service_installed":true'*) true ;; *) false ;; esac
+
+  # devtunnel: the CLI half of VS Code's port forwarding (`tn tunnel`, the plugin below). Microsoft's Linux installer is a curl of one binary into ~/bin, an
+  # unconditional `sudo apt-get update && install libsecret-1-0`, a PATH line appended to
+  # ~/.zshrc when ~/bin is not on PATH, and a chmod last; the same binary as a `download` (kept
+  # current by ETag, no rc edits, no sudo mid-run) plus its one dependency replace it.
+  - label: devtunnel dependency (libsecret)
+    when: { os: linux }
+    package:
+      apt: [libsecret-1-0]
+
+  - label: Install devtunnel (x86_64)
+    when: { os: linux, arch: x86_64 }
+    download:
+      url: https://tunnelsassetsprod.blob.core.windows.net/cli/linux-x64-devtunnel
+      dest: ~/.local/bin/devtunnel
+      mode: "0755"
+
+  - label: Install devtunnel (aarch64)
+    when: { os: linux, arch: aarch64 }
+    download:
+      url: https://tunnelsassetsprod.blob.core.windows.net/cli/linux-arm64-devtunnel
+      dest: ~/.local/bin/devtunnel
+      mode: "0755"
+
+  # Microsoft's installer (the old repo's devtunnel.sh) put the binary in ~/bin. It is never
+  # updated again, and ~/bin is still on PATH (zshrc, after ~/.local/bin), so remove it.
+  - label: Remove the old ~/bin/devtunnel
+    when: { os: linux }
+    absent:
+      ~/bin/devtunnel: {}
+
+  # A bare binary cask (no .app), so dot does not add --adopt.
+  - label: Install devtunnel
+    when: { os: [macos, windows] }
+    package:
+      cask: [devtunnel]
+      winget: [Microsoft.devtunnel]
+
+  # `tn tunnel open|ls|close` (docs/tn.md §7.4). Copied, never linked (as every tn plugin): the
+  # command keeps working while this checkout moves or is mid-edit. tests/ is never copied.
+  - label: Copy the tn plugin
+    copy:
+      ~/.local/share/tn/plugins/vscode.py: plugin.py

@@ -1,0 +1,27 @@
+# yaml-language-server: $schema=https://github.com/trungngo/dot-cli/releases/latest/download/bundle.schema.json
+#
+# Blender, the 3D creation suite: the Blender Foundation's snap on Linux, cask on macOS, winget
+# on Windows. Opt-in: no profile selects it (`dot apply blender`). Nothing is linked: Blender
+# keeps only its own generated settings. Why and gotchas: README.md.
+name: blender
+description: Blender 3D creation suite (opt-in)
+requires: [common]
+when: { role: desktop }
+
+steps:
+  # The snap is published by the Blender Foundation itself (classic confinement, so add-ons and
+  # render engines can reach the GPU drivers and the whole filesystem) and follows the latest
+  # stable release; Ubuntu's apt package lags several releases behind. snapd needs systemd as
+  # PID 1, hence the `init` guard; `fallback: false` keeps dot from installing the old apt
+  # package under the same name where snapd is missing.
+  - label: Install Blender
+    when: { os: linux, init: systemd }
+    package:
+      snap: [{ name: blender, classic: true, fallback: false }]
+
+  # winget `BlenderFoundation.Blender` tracks the newest release (the `.LTS.4.x` IDs pin a series).
+  - label: Install Blender
+    when: { os: [macos, windows] }
+    package:
+      cask: [blender]
+      winget: [BlenderFoundation.Blender]

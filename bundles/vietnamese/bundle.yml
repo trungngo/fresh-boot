@@ -1,0 +1,85 @@
+# yaml-language-server: $schema=https://github.com/trungngo/dot-cli/releases/latest/download/bundle.schema.json
+#
+# Vietnamese on an Ubuntu desktop: the language packs (translations, the vi_VN locale) and
+# Telex / VNI typing through IBus Unikey, added to GNOME's input sources (Super+Space switches).
+# On Windows: the vi-VN language pack and Windows' own Vietnamese Telex keyboard (Win+Space
+# switches). The display language is left alone. See README.md.
+name: vietnamese
+description: Vietnamese language packs and Telex input (Ubuntu desktop, Windows)
+requires: [common]
+when: { os: [linux, windows], role: desktop }
+
+steps:
+  # language-pack-vi pulls in -base (which generates vi_VN.UTF-8); the gnome pack carries the
+  # GNOME / GTK translations. Both are Ubuntu archive packages, as Language Support installs them.
+  - label: Install the Vietnamese language packs
+    when: { os: linux, distro: ubuntu }
+    package:
+      apt: [language-pack-vi, language-pack-gnome-vi]
+
+  # Unikey is in Ubuntu's archive and brings ibus with it. ibus-bamboo is not packaged by Ubuntu
+  # (only a third-party repository), so it is not used.
+  - label: Install IBus Unikey
+    when: { os: linux, distro: ubuntu }
+    package:
+      apt: [ibus-unikey]
+
+  # dot has no gsettings directive. Appends Unikey to the existing sources, keeping their order;
+  # skipped on a desktop without GNOME's input-sources schema.
+  - label: Add Vietnamese (Unikey) to the GNOME input sources
+    when: { os: linux, distro: ubuntu }
+    only_if: gsettings list-keys org.gnome.desktop.input-sources
+    shell:
+      cmd: |
+        cur=$(gsettings get org.gnome.desktop.input-sources sources)
+        case "$cur" in
+          *"[]") new="[('ibus', 'Unikey')]" ;;
+          *) new="${cur%]}, ('ibus', 'Unikey')]" ;;
+        esac
+        gsettings set org.gnome.desktop.input-sources sources "$new"
+      unless: gsettings get org.gnome.desktop.input-sources sources | grep -qF "('ibus', 'Unikey')"
+
+  # Windows 11's built-in Vietnamese Telex keyboard (a TSF input method, not a layout; its sibling
+  # {591AE943-...} is "Vietnamese Number Key-Based", i.e. VNI). Added to Vietnamese in the user's
+  # language list (the language is added if missing); the plain "Vietnamese" layout
+  # (042A:0000042A, no Telex) that adding the language brings is removed. Other languages and
+  # keyboards are kept. Per user: no elevation.
+  - label: Vietnamese Telex keyboard (Windows)
+    when: { os: windows }
+    shell:
+      prelude: |
+        $telex = '042A:{C2CB2CF0-AF47-413E-9780-8BC3A3C16068}{5FB02EC5-0A77-4684-B4FA-DEF8A2195628}'
+      cmd: |
+        $list = Get-WinUserLanguageList
+        $vi = $list | Where-Object { $_.LanguageTag -like 'vi*' } | Select-Object -First 1
+        if (-not $vi) {
+          $list.Add('vi-VN')
+          $vi = $list | Where-Object { $_.LanguageTag -like 'vi*' } | Select-Object -First 1
+        }
+        [void]$vi.InputMethodTips.Remove('042A:0000042A')
+        if ($vi.InputMethodTips -notcontains $telex) { $vi.InputMethodTips.Add($telex) }
+        Set-WinUserLanguageList $list -Force
+      unless: |
+        $vi = Get-WinUserLanguageList | Where-Object { $_.LanguageTag -like 'vi*' } | Select-Object -First 1
+        if ($vi -and $vi.InputMethodTips -contains $telex) { exit 0 } else { exit 1 }
+
+  # Windows: the vi-VN language pack (Install-Language, the LanguagePackManagement module that
+  # Settings > Time & language > Language uses). It needs administrator rights, so it runs in an
+  # elevated Windows PowerShell, the module's own host (one UAC prompt, as winget installers ask),
+  # and the step waits for it; that window closes on exit, so its result or error goes through a
+  # temporary log printed here. -CopyToSettings is not passed: the display language stays as it
+  # is. Get-InstalledLanguage needs no elevation.
+  - label: Install the Vietnamese language pack (Windows)
+    when: { os: windows }
+    shell:
+      cmd: |
+        $log = Join-Path ([IO.Path]::GetTempPath()) 'dot-install-language-vi.log'
+        Remove-Item -LiteralPath $log -ErrorAction SilentlyContinue
+        $inner = "try { Install-Language -Language vi-VN -ErrorAction Stop | Out-String | Set-Content -LiteralPath '$log'; exit 0 } catch { `$_ | Out-String | Set-Content -LiteralPath '$log'; exit 1 }"
+        $p = Start-Process -FilePath powershell.exe -Verb RunAs -Wait -PassThru `
+          -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', $inner
+        if (Test-Path -LiteralPath $log) { Get-Content -LiteralPath $log }
+        exit $p.ExitCode
+      unless: |
+        $l = Get-InstalledLanguage -Language vi-VN
+        if ($l -and "$($l.LanguagePacks)" -match 'Lp') { exit 0 } else { exit 1 }

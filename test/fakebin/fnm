@@ -1,0 +1,9 @@
+#!/bin/sh
+# Fake fnm (Fast Node Manager): `install --lts` records an LTS in $FAKE_STATE/fnm, which `list`
+# then shows as the default `lts-latest`. Anything else succeeds.
+echo "fnm $*" >> "$FAKE_LOG"
+case "$1" in
+  list) [ -f "$FAKE_STATE/fnm" ] && echo "* v99.0.0 default, lts-latest"; echo "* system" ;;
+  install) [ "$2" = --lts ] && echo lts > "$FAKE_STATE/fnm" ;;
+esac
+exit 0

@@ -1,0 +1,53 @@
+#!/bin/sh
+# Fake git: the REAL git (next on PATH), but every https:// remote is redirected with
+# url.<base>.insteadOf to a local bare repository under $FAKE_STATE/git/<host>/<path>, created on
+# first use with one empty commit on `master`. `git:` steps then clone, ls-remote, fetch and
+# fast-forward without the network, and `remote.origin.url` still reads the https URL.
+# To simulate an upstream change: commit into that bare repository.
+# The system config is $FAKE_STATE/gitconfig-system (GIT_CONFIG_SYSTEM), never the host's
+# /etc/gitconfig, and `git lfs install --system` (git-lfs need not be installed) writes the
+# filter.lfs keys there.
+echo "git $*" >> "$FAKE_LOG"
+here=$(cd "$(dirname "$0")" && pwd)
+real=
+IFS=:
+for d in $PATH; do
+  [ "$d" = "$here" ] && continue
+  [ -x "$d/git" ] && { real="$d/git"; break; }
+done
+unset IFS
+[ -n "$real" ] || { echo "fake git: no real git on PATH" >&2; exit 127; }
+mirrors="$FAKE_STATE/git"
+for a in "$@"; do
+  case "$a" in
+    https://*)
+      m="$mirrors/${a#https://}"
+      if [ ! -d "$m" ]; then
+        mkdir -p "$m"
+        "$real" init -q --bare "$m"
+        "$real" -C "$m" symbolic-ref HEAD refs/heads/master
+        t=$(mktemp -d)
+        "$real" -C "$t" init -q
+        "$real" -C "$t" -c user.name=fake -c user.email=fake@example.invalid \
+          commit -q --allow-empty -m "fake upstream of $a"
+        "$real" -C "$t" push -q "$m" HEAD:refs/heads/master
+        rm -rf "$t"
+      fi ;;
+  esac
+done
+GIT_CONFIG_SYSTEM="$FAKE_STATE/gitconfig-system"
+export GIT_CONFIG_SYSTEM
+if [ "$1 $2" = "lfs install" ]; then
+  case " $* " in *" --system "*) ;; *) echo "fake git: only lfs install --system" >&2; exit 1 ;; esac
+  mkdir -p "$FAKE_STATE" &&
+  "$real" config --system filter.lfs.clean "git-lfs clean -- %f" &&
+  "$real" config --system filter.lfs.smudge "git-lfs smudge -- %f" &&
+  "$real" config --system filter.lfs.process "git-lfs filter-process" &&
+  "$real" config --system filter.lfs.required true
+  exit
+fi
+GIT_CONFIG_COUNT=1
+GIT_CONFIG_KEY_0="url.file://$mirrors/.insteadOf"
+GIT_CONFIG_VALUE_0="https://"
+export GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
+exec "$real" "$@"

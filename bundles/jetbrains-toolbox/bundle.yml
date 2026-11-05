@@ -1,0 +1,50 @@
+# yaml-language-server: $schema=https://github.com/trungngo/dot-cli/releases/latest/download/bundle.schema.json
+#
+# JetBrains Toolbox App: installs and updates the JetBrains IDEs (the idea bundle tunes them).
+# Desktop only. macOS cask, Windows winget, Linux JetBrains' own tarball. See README.md.
+name: jetbrains-toolbox
+description: JetBrains Toolbox App, which installs and updates the JetBrains IDEs
+requires: [common]
+when: { os: [linux, macos, windows], role: desktop }
+
+steps:
+  # dot adds --adopt to the cask (an `app` artifact), so a Toolbox already in /Applications is
+  # taken over. Toolbox updates itself afterwards; brew / winget catch up on `--upgrade`.
+  - label: Install JetBrains Toolbox
+    when: { os: [macos, windows] }
+    package:
+      cask: [jetbrains-toolbox]
+      winget: [JetBrains.Toolbox]
+
+  # No apt repo and no GitHub release: JetBrains' download service is the official source. Its
+  # release feed names the latest build (the linux link, jetbrains-toolbox-<build>.tar.gz), the
+  # tarball comes from download.jetbrains.com and is checked against the .sha256 published next
+  # to it. The archive is jetbrains-toolbox-<build>/bin/...: strip 2 puts bin/'s contents in
+  # ~/.local/share/JetBrains/Toolbox/bin, where Toolbox installs (and self-updates) itself, so a
+  # first launch finds itself already in place. Merged, not `replace:`d: Toolbox rewrites that
+  # directory when it updates, and IDEs live next to it under Toolbox/apps.
+  - label: Install JetBrains Toolbox (latest tarball, x86_64)
+    when: { os: linux, arch: x86_64 }
+    download:
+      url: "https://download.jetbrains.com/toolbox/jetbrains-toolbox-{latest}.tar.gz"
+      latest:
+        url: "https://data.services.jetbrains.com/products/releases?code=TBA&latest=true&type=release"
+        pattern: 'jetbrains-toolbox-([0-9][0-9.]*)\.tar\.gz'
+      sha256_url: "https://download.jetbrains.com/toolbox/jetbrains-toolbox-{latest}.tar.gz.sha256"
+      dest: ~/.local/share/JetBrains/Toolbox/bin
+      extract: tar.gz
+      strip: 2
+      bin: [jetbrains-toolbox]
+
+  - label: Install JetBrains Toolbox (latest tarball, aarch64)
+    when: { os: linux, arch: aarch64 }
+    download:
+      url: "https://download.jetbrains.com/toolbox/jetbrains-toolbox-{latest}-arm64.tar.gz"
+      latest:
+        url: "https://data.services.jetbrains.com/products/releases?code=TBA&latest=true&type=release"
+        pattern: 'jetbrains-toolbox-([0-9][0-9.]*)\.tar\.gz'
+      sha256_url: "https://download.jetbrains.com/toolbox/jetbrains-toolbox-{latest}-arm64.tar.gz.sha256"
+      dest: ~/.local/share/JetBrains/Toolbox/bin
+      extract: tar.gz
+      strip: 2
+      bin: [jetbrains-toolbox]

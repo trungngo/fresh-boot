@@ -1,0 +1,55 @@
+# yaml-language-server: $schema=https://github.com/trungngo/dot-cli/releases/latest/download/bundle.schema.json
+#
+# JetBrains host tuning, opt-in (`dot apply idea`): the inotify watch limit (Linux, servers
+# too: a JetBrains Gateway / remote-dev backend watches the project there) and Markdown opening
+# in Preview only in every installed JetBrains product (desktop). Installs no IDE itself: on a
+# desktop it pulls in jetbrains-toolbox, which installs and updates them. ~/.ideavimrc comes
+# from the vim bundle. See README.md.
+name: idea
+description: "JetBrains host tuning: inotify limit (Linux) and Markdown preview-only (opt-in)"
+requires: [common]
+# Toolbox is desktop-only (a GUI app); a plain `requires` would make `dot apply idea` an error
+# on a server, where the inotify half is still wanted.
+requires_if:
+  - when: { role: desktop }
+    requires: [jetbrains-toolbox]
+when: { os: [linux, macos, windows] }
+
+steps:
+  # JetBrains' "Inotify Watches Limit" advice (the old repo cited
+  # https://confluence.jetbrains.com/display/IDEADEV/Inotify+Watches+Limit). Linux-only.
+  # Not in a container: the host's kernel owns the limit and `sysctl --system` fails there.
+  - label: Raise the inotify watch limit
+    when: { os: linux, env: "!container" }
+    copy:
+      /etc/sysctl.d/idea.conf: { src: idea.conf, root: true, mode: "0644" }
+    notify: [reload-sysctl]
+
+  # MarkdownSettings.splitLayout (a TextEditorWithPreview.Layout: SHOW_EDITOR, SHOW_PREVIEW,
+  # SHOW_EDITOR_AND_PREVIEW), per product, in <config>/JetBrains/<Product>/options/markdown.xml:
+  # one file per product whose options directory exists now. Matches the vscode bundle's
+  # `workbench.editorAssociations` for *.md.
+  #
+  # JetBrains IDEs rewrite options/*.xml on exit, so a running IDE would undo this: `only_if`
+  # (asked only when a file needs writing) skips the step, saying why, while one is open. Close
+  # the IDE and re-run `dot apply idea`.
+  - label: Markdown opens in Preview only
+    when: { os: [linux, macos], role: desktop }
+    only_if: sh jetbrains-closed.sh
+    template:
+      "{{ config_dir }}/JetBrains/*/options/markdown.xml": markdown.xml
+
+  - label: Markdown opens in Preview only (Windows)
+    when: { os: windows, role: desktop }
+    only_if: |
+      $names = 'idea64','pycharm64','goland64','rider64','webstorm64','clion64','datagrip64','dataspell64','rustrover64','phpstorm64','rubymine64'
+      if (Get-Process -Name $names -ErrorAction SilentlyContinue) { exit 1 } else { exit 0 }
+    template:
+      "{{ config_dir }}/JetBrains/*/options/markdown.xml": markdown.xml
+
+handlers:
+  reload-sysctl:
+    label: Reload sysctl settings
+    shell:
+      cmd: sudo sysctl --system
+      sudo: true

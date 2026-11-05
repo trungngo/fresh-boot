@@ -1,0 +1,28 @@
+#!/bin/sh
+# Fake gpg. --dearmor writes a "binary" key keeping the input's `fake-fpr` line; --show-keys
+# prints one primary key per fingerprint on the key file's `fake-fpr` line (fake curl writes it),
+# else the one in $FAKE_STATE/fpr, else zeros.
+echo "gpg $*" >> "$FAKE_LOG"
+out=""; mode=""; file=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --output) out="$2"; shift ;;
+    --homedir) shift ;;
+    --dearmor) mode=dearmor ;;
+    --show-keys) mode=show ;;
+    -*) ;;
+    *) file=$1 ;;
+  esac
+  shift
+done
+fprs=$(sed -n 's/.*fake-fpr //p' "$file" 2>/dev/null | head -1)
+[ -n "$fprs" ] || fprs=$(cat "$FAKE_STATE/fpr" 2>/dev/null)
+[ -n "$fprs" ] || fprs=0000000000000000000000000000000000000000
+case "$mode" in
+  dearmor) printf 'BINARY-KEY\nfake-fpr %s\n' "$fprs" > "$out" ;;
+  show)
+    for fpr in $fprs; do
+      echo "pub:-:4096:1:${fpr#????????????????????????}:1:::-:::scESA:"
+      echo "fpr:::::::::$fpr:"
+    done ;;
+esac

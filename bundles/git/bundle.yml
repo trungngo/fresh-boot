@@ -1,0 +1,37 @@
+# yaml-language-server: $schema=https://github.com/trungngo/dot-cli/releases/latest/download/bundle.schema.json
+#
+# Global git configuration, plus the `tn git` plugin. git itself comes from `common` (apt / brew /
+# winget Git.Git). ~/.gitconfig is rendered, not linked: the identity comes from MY_NAME /
+# MY_EMAIL (dot.yml prompts, kept in ~/.config/dot/local.env). Machine-local settings go in
+# ~/.gitconfig.local, which the template includes last. The tn plugin and the public forges are
+# copied, never linked; private tn config (people, own namespaces) is a file you write by hand in
+# ~/.config/tn/conf.d/ (private.toml.example). See README.md and docs/private-overlay.md.
+name: git
+description: ~/.gitconfig, ~/.gitignore_global and the tn git plugin
+requires: [common, tn, projects]
+
+steps:
+  - label: ~/.gitconfig (identity, excludes, credential helpers)
+    template:
+      ~/.gitconfig: gitconfig
+
+  - label: Machine-local ~/.gitconfig.local
+    create:
+      ~/.gitconfig.local: { file: true }
+
+  - label: Link ~/.gitignore_global
+    link:
+      ~/.gitignore_global: gitignore_global
+
+  # `tn git ...`. Copied, never linked (as every tn plugin): the command keeps working while this
+  # checkout moves or is mid-edit. tests/ is never copied.
+  - label: Copy the tn plugin
+    copy:
+      ~/.local/share/tn/plugins/git.py: plugin.py
+
+  # The public forges (github.com, gitlab.com, bitbucket), replacing the per-forge git-*.sh
+  # scripts. tn reads conf.d/*.toml in name order, under ~/.config/tn/config.toml, which wins
+  # for anything set there.
+  - label: tn config fragment (public forges)
+    copy:
+      ~/.config/tn/conf.d/git-forges.toml: git-forges.toml

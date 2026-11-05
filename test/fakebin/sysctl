@@ -1,0 +1,9 @@
+#!/bin/sh
+# Fake sysctl: `--system` (the idea bundle's reload after writing /etc/sysctl.d) is logged and
+# succeeds; reads (`sysctl -n <key>`, as dot's fact detection does) go to the real sysctl.
+if [ "${1:-}" = --system ]; then
+  echo "sysctl $*" >> "$FAKE_LOG"
+  exit 0
+fi
+for d in /usr/sbin /sbin /usr/bin; do [ -x "$d/sysctl" ] && exec "$d/sysctl" "$@"; done
+exit 1

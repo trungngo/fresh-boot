@@ -1,0 +1,88 @@
+# yaml-language-server: $schema=https://github.com/trungngo/dot-cli/releases/latest/download/bundle.schema.json
+#
+# zsh as the login shell, its two plugins from the package manager, the starship prompt, and
+# ~/.zshrc: the only bundle that owns ~/.zshrc. No oh-my-zsh and no plugin manager: zshrc does
+# what oh-my-zsh's libs did (history, completion, keys) itself. Other bundles reach the shell
+# through `path:` / `env:` steps (sourced from `dot env --shell zsh`) and
+# ~/.config/zsh/conf.d/<name>.zsh; see zshrc and CLAUDE.md.
+name: zsh
+description: zsh as login shell, autosuggestions + syntax highlighting, starship, ~/.zshrc
+requires: [common]
+provides: [zsh]
+when: { os: [linux, macos] }
+
+steps:
+  # The plugins have the same names in apt and Homebrew; zshrc sources them from
+  # /usr/share/<name>/ (apt) or $HOMEBREW_PREFIX/share/<name>/ (brew).
+  - label: Install zsh and its plugins
+    package:
+      apt: [zsh, zsh-autosuggestions, zsh-syntax-highlighting]
+      brew: [zsh, zsh-autosuggestions, zsh-syntax-highlighting]
+
+  # Ubuntu's starship package lags far behind (and does not exist before 24.10); upstream's musl
+  # builds are static, so one asset per CPU covers every distro. Homebrew on macOS.
+  - label: Install starship (latest release)
+    when: { os: linux }
+    github_release:
+      repo: starship/starship
+      asset:
+        linux/x86_64: starship-x86_64-unknown-linux-musl.tar.gz
+        linux/aarch64: starship-aarch64-unknown-linux-musl.tar.gz
+
+  - label: Install starship
+    when: { os: macos }
+    package:
+      brew: [starship]
+
+  # Replaces `sudo usermod -s $(which zsh)`: resolved through /etc/shells, added there if missing.
+  - label: zsh as the login shell
+    when: { os: linux }
+    user:
+      shell: zsh
+
+  # macOS already logs in with /bin/zsh; the old repo switched to Homebrew's (newer) build, which
+  # must be listed in /etc/shells first. `shell: zsh` would keep /bin/zsh (same name, listed), so
+  # the path is spelled out: {{ homebrew_prefix }} is /opt/homebrew (Apple silicon) or /usr/local.
+  - label: Homebrew zsh as the login shell
+    when: { os: macos }
+    user:
+      shell: "{{ homebrew_prefix }}/bin/zsh"
+
+  # The old repo left ~/.oh-my-zsh as a symlink into its vendor/ submodule; nothing reads it now.
+  # Only a symlink is removed: a real checkout is left for the user to delete (README.md).
+  - label: Retire the legacy ~/.oh-my-zsh symlink
+    absent:
+      ~/.oh-my-zsh: { only: link }
+
+  - label: Link ~/.zshrc
+    link:
+      ~/.zshrc: zshrc
+
+  # An ssh login brings the client's TERM. A box with no terminfo entry for it (xterm-ghostty on
+  # a stock Ubuntu, say) leaves zsh, Claude Code, vim and tmux guessing: broken completion, keys
+  # and paste. The real fix is the entry itself (Ghostty's ssh-terminfo installs it, see the
+  # ghostty bundle; or `infocmp -x $TERM | ssh host -- tic -x -`). Until it is there, fall back
+  # to xterm-256color, which every box has. ~/.zshenv runs before ~/.zshrc, so everything starts
+  # up with it; a known TERM is never touched. A managed block: the rest of ~/.zshenv is kept.
+  - label: Known terminal type for interactive logins
+    when: { os: linux }
+    block:
+      file: ~/.zshenv
+      content: |
+        if [[ -o interactive ]] && ! infocmp "$TERM" >/dev/null 2>&1; then
+            export TERM=xterm-256color
+        fi
+
+  # Machine-local overrides, sourced last by zshrc; never tracked, never overwritten.
+  - label: Machine-local ~/.local.zshrc
+    create:
+      ~/.local.zshrc: { file: true }
+
+  # Where other bundles link their <name>.zsh (zshrc sources *.zsh here in name order).
+  - label: Per-bundle shell integrations directory
+    create:
+      - ~/.config/zsh/conf.d
+
+  # A bundle's .zsh file renamed or deleted in the repo leaves a dangling link here.
+  - label: Remove dangling links in conf.d
+    clean: [~/.config/zsh/conf.d]

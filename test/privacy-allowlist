@@ -1,0 +1,15 @@
+# Intentional references test/privacy-check.sh accepts (one literal per line, removed from each
+# line before it is checked). Only where the tools are published: the dot (dot-cli) and
+# fresh-boot repositories, used by the install one-liners, `dot self-update` and the `$schema`
+# lines. Nothing else belongs here; see docs/private-overlay.md.
+github.com/trungngo/dot-cli
+githubusercontent.com/trungngo/dot-cli
+repos/trungngo/dot-cli
+github.com/trungngo/fresh-boot
+githubusercontent.com/trungngo/fresh-boot
+trungngo/dot-cli
+trungngo/fresh-boot
+# The license names the copyright holder.
+Copyright (c) 2026 Trung Ngo
+# Public vendor addresses (signing-key uids in package-repository fixtures).
+docker@docker.com

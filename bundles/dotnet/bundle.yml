@@ -1,0 +1,23 @@
+# yaml-language-server: $schema=https://github.com/trungngo/dot-cli/releases/latest/download/bundle.schema.json
+#
+# The .NET SDK (opt-in: `dot apply dotnet`). Ubuntu: the newest `dotnet-sdk-N.M` in the Ubuntu
+# archive (NOT packages.microsoft.com). macOS: the `dotnet-sdk` cask. See README.md.
+name: dotnet
+description: The .NET SDK (opt-in)
+requires: [common]
+provides: [dotnet]
+when: { os: [linux, macos] }
+
+steps:
+  # `dotnet-sdk-*`: the newest `dotnet-sdk-N.M` in the archive (dot prefers a bare version to a
+  # longer name such as `dotnet-sdk-N.M-source-built-artifacts`).
+  # The cask is a `.pkg` installer: no --adopt (dot knows), and it runs `sudo installer`,
+  # so apply it from a terminal.
+  - label: .NET SDK
+    package:
+      apt: ["dotnet-sdk-*"]
+      cask: [dotnet-sdk]
+
+  # Where `dotnet tool install -g` puts its commands.
+  - label: .NET global tools on PATH
+    path: [~/.dotnet/tools]

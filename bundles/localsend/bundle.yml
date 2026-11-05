@@ -1,0 +1,82 @@
+# yaml-language-server: $schema=https://github.com/trungngo/dot-cli/releases/latest/download/bundle.schema.json
+#
+# LocalSend: send files between nearby devices over the local network, no account or cloud.
+# Linux takes upstream's .deb from the latest GitHub release; macOS the cask, Windows winget.
+# Nothing is linked: LocalSend keeps only generated settings. See README.md.
+name: localsend
+description: LocalSend, file sharing over the local network
+requires: [common]
+when: { role: desktop }
+
+steps:
+  # Assets are LocalSend-<version>-linux-x86-64.deb / -linux-arm-64.deb. The .deb sets up no apt
+  # repository, so `dot apply --upgrade` (or any run after a new release) moves it on.
+  - label: Install LocalSend (.deb from the latest release)
+    when: { os: linux, family: debian }
+    github_release:
+      repo: localsend/localsend
+      package: localsend
+      asset:
+        linux/x86_64: "LocalSend-*-linux-x86-64.deb"
+        linux/aarch64: "LocalSend-*-linux-arm-64.deb"
+
+  - label: Install LocalSend
+    when: { os: [macos, windows] }
+    package:
+      cask: [localsend]
+      winget: [LocalSend.LocalSend]
+
+  # The name other devices see: this machine's short name, not the random one LocalSend makes on
+  # first launch ("Mystic Orange"). Stored as flutter.ls_alias in the app's sandboxed preferences.
+  # Only once the app has run here (its container exists); the app keeps the name it has in
+  # memory, so quit LocalSend before a run that changes it.
+  - label: LocalSend name is this machine's short name (macOS)
+    when: { os: macos }
+    only_if: test -f "$HOME/Library/Containers/org.localsend.localsendApp/Data/Library/Preferences/org.localsend.localsendApp.plist"
+    shell:
+      cmd: defaults write "$HOME/Library/Containers/org.localsend.localsendApp/Data/Library/Preferences/org.localsend.localsendApp" flutter.ls_alias -string "{{ MY_MACHINE }}"
+      unless: test "$(defaults read "$HOME/Library/Containers/org.localsend.localsendApp/Data/Library/Preferences/org.localsend.localsendApp" flutter.ls_alias 2>/dev/null)" = "{{ MY_MACHINE }}"
+
+  # Linux: the same key, in a JSON file next to the app's other settings (which include its
+  # private key, so only `flutter.ls_alias` is touched; written compact, as the app does, to a
+  # temporary file and renamed over the original). Only once the app has run here (the file
+  # exists). The app keeps the name it has in memory: quit LocalSend before a run that changes it.
+  - label: LocalSend name is this machine's short name (Linux)
+    when: { os: linux }
+    only_if: test -f "{{ data_dir }}/org.localsend.localsend_app/shared_preferences.json"
+    shell:
+      cmd: |
+        python3 - "{{ data_dir }}/org.localsend.localsend_app/shared_preferences.json" "{{ MY_MACHINE }}" <<'PY'
+        import json, os, sys
+        path, name = sys.argv[1:3]
+        with open(path) as f:
+            prefs = json.load(f)
+        prefs["flutter.ls_alias"] = name
+        tmp = path + ".dot-tmp"
+        with open(tmp, "w") as f:
+            json.dump(prefs, f, separators=(",", ":"), ensure_ascii=False)
+        os.chmod(tmp, os.stat(path).st_mode & 0o777)
+        os.replace(tmp, path)
+        PY
+      unless: python3 -c 'import json, sys; sys.exit(json.load(open(sys.argv[1])).get("flutter.ls_alias") != sys.argv[2])' "{{ data_dir }}/org.localsend.localsend_app/shared_preferences.json" "{{ MY_MACHINE }}"
+
+  # Windows: the same key in %APPDATA%\LocalSend\settings.json (the app's Flutter preferences
+  # file; it also holds the other ls_* settings, which are kept). Rewritten compact as UTF-8
+  # without a BOM, through a temporary file renamed over the original. Only once the app has run
+  # here (the file exists: Test-Path exits 0 either way, so the guard exits 1 itself). Quit LocalSend first: it keeps its in-memory name and rewrites the
+  # file on exit.
+  - label: LocalSend name is this machine's short name (Windows)
+    when: { os: windows }
+    only_if: 'if (-not (Test-Path -LiteralPath "{{ appdata }}\LocalSend\settings.json")) { exit 1 }'
+    shell:
+      cmd: |
+        $p = "{{ appdata }}\LocalSend\settings.json"
+        $json = Get-Content -LiteralPath $p -Raw -Encoding UTF8 | ConvertFrom-Json
+        $json.'flutter.ls_alias' = "{{ MY_MACHINE }}"
+        $text = $json | ConvertTo-Json -Depth 10 -Compress
+        $tmp = "$p.dot-tmp"
+        [IO.File]::WriteAllText($tmp, $text, (New-Object Text.UTF8Encoding $false))
+        Move-Item -LiteralPath $tmp -Destination $p -Force
+      unless: |
+        $json = Get-Content -LiteralPath "{{ appdata }}\LocalSend\settings.json" -Raw -Encoding UTF8 | ConvertFrom-Json
+        if ($json.'flutter.ls_alias' -eq "{{ MY_MACHINE }}") { exit 0 } else { exit 1 }

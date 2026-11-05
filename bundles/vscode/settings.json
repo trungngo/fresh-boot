@@ -1,0 +1,60 @@
+{
+  "window.zoomLevel": 1.5,
+  "editor.fontSize": 14,
+  "terminal.integrated.fontSize": 13,
+  "editor.minimap.enabled": false,
+  "vim.handleKeys": {
+    "<C-p>": false,
+    "<C-space>": false,
+    "<C-d>": true,
+    "<C-s>": false,
+    "<C-z>": false
+  },
+  "git.openRepositoryInParentFolders": "always",
+  "vim.leader": " ",
+  "vim.easymotion": true,
+  "vim.hlsearch": true,
+  "vim.useSystemClipboard": true,
+  "editor.lineNumbers": "relative",
+  "vim.normalModeKeyBindingsNonRecursive": [
+    {"before": ["<leader>", "w", "p"], "commands": ["workbench.action.openRecent"]},
+    {"before": ["<leader>", "w", "s"], "commands": ["workbench.action.showAllEditors"]},
+    {"before": ["<leader>", "f", "f"], "commands": ["actions.find"]},
+    {"before": ["<leader>", "f", "a"], "commands": ["workbench.action.findInFiles"]},
+    {"before": ["<leader>", "f", "u"], "commands": ["editor.action.goToReferences"]},
+    {"before": ["<leader>", "t", "h"], "commands": [":nohl"]},
+    {"before": ["<leader>", "t"], "commands": ["workbench.action.selectTheme"]},
+    {"before": ["<leader>", "c", "f"], "commands": ["editor.action.formatDocument"]},
+    {"before": ["<leader>", "c", "o"], "commands": ["editor.action.organizeImports"]},
+    {"before": ["<leader>", "c", "p"], "commands": ["workbench.view.scm"]},
+    {"before": ["<leader>", "s"], "commands": ["workbench.action.gotoSymbol"]},
+    {"before": ["<leader>", "g", "s"], "commands": ["workbench.action.showAllSymbols"]},
+    {"before": ["<leader>", "g", "c"], "commands": ["workbench.action.showAllSymbols"]},
+    {"before": ["<leader>", "g", "a"], "commands": ["workbench.action.showCommands"]},
+    {"before": ["<leader>", "g", "f"], "commands": ["workbench.action.quickOpen"]},
+    {"before": ["<leader>", "g", "d"], "commands": ["editor.action.revealDefinition"]},
+    {"before": ["g", "e"], "commands": ["editor.action.marker.next"]},
+    {"before": ["]", "e"], "commands": ["editor.action.marker.next"]},
+    {"before": ["[", "e"], "commands": ["editor.action.marker.prev"]},
+    {"before": ["<leader>", "r", "r"], "commands": ["editor.action.rename"]},
+    {"before": ["<leader>", "a"], "commands": ["editor.action.refactor"]},
+    {"before": ["<leader>", "e"], "commands": ["editor.action.refactor"]},
+    {"before": ["<leader>", "i"], "commands": ["editor.action.refactor"]},
+    {"before": ["<leader>", "m"], "commands": ["editor.action.refactor"]},
+    {"before": ["<CR>"], "commands": ["editor.action.quickFix"]},
+    {"before": ["<leader>", "b", "r"], "commands": ["workbench.action.debug.run"]},
+    {"before": ["<leader>", "b", "d"], "commands": ["workbench.action.debug.start"]},
+    {"before": ["<leader>", "b", "b"], "commands": ["editor.debug.action.toggleBreakpoint"]},
+    {"before": ["<leader>", "b", "c"], "commands": ["workbench.action.debug.selectandstart"]},
+    {"before": ["<leader>", "b", "a"], "commands": ["workbench.action.debug.selectandstart"]},
+    {"before": ["="], "commands": ["editor.action.fontZoomIn"]},
+    {"before": ["-"], "commands": ["editor.action.fontZoomOut"]}
+  ],
+  "vim.visualModeKeyBindingsNonRecursive": [
+    {"before": ["<leader>", "e"], "commands": ["editor.action.refactor"]}
+  ],
+  "workbench.editorAssociations": {
+    "*.md": "vscode.markdown.preview.editor"
+  },
+  "claudeCode.preferredLocation": "panel"
+}

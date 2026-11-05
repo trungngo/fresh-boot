@@ -1,0 +1,30 @@
+# yaml-language-server: $schema=https://github.com/trungngo/dot-cli/releases/latest/download/bundle.schema.json
+#
+# Microsoft Teams (work or school). macOS the cask, Windows winget. Microsoft no longer ships a
+# Linux client: Linux gets teams-for-linux, an UNOFFICIAL Electron wrapper around the Teams web
+# app, as the .deb from its latest GitHub release. Nothing is linked. See README.md.
+name: teams
+description: Microsoft Teams (unofficial teams-for-linux on Linux)
+requires: [common]
+when: { role: desktop }
+
+steps:
+  # Assets are teams-for-linux_<version>_amd64.deb / _arm64.deb. The .deb sets up no apt
+  # repository (its install script registers the binary, desktop entry and an AppArmor
+  # profile), so `dot apply` after a new release moves it on.
+  - label: Install teams-for-linux (unofficial client, .deb from the latest release)
+    when: { os: linux, family: debian }
+    github_release:
+      repo: IsmaelMartinez/teams-for-linux
+      package: teams-for-linux
+      asset:
+        linux/x86_64: "teams-for-linux_*_amd64.deb"
+        linux/aarch64: "teams-for-linux_*_arm64.deb"
+
+  # The cask is a .pkg (Homebrew asks for the sudo password in the terminal) and needs
+  # macOS 14 or later.
+  - label: Install Microsoft Teams
+    when: { os: [macos, windows] }
+    package:
+      cask: [microsoft-teams]
+      winget: [Microsoft.Teams]

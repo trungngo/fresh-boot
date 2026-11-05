@@ -1,0 +1,25 @@
+# yaml-language-server: $schema=https://github.com/trungngo/dot-cli/releases/latest/download/bundle.schema.json
+#
+# The Slack desktop client: snap on Linux, cask on macOS, winget on Windows. Nothing is linked:
+# Slack keeps only generated state and workspace sessions. Why and gotchas: README.md.
+name: slack
+description: Slack desktop client
+requires: [common]
+when: { role: desktop }
+
+steps:
+  # Slack retired its apt repository; the snap is publisher-verified and updates itself. snapd
+  # needs systemd as PID 1 (not in containers or WSL without `[boot] systemd=true`), hence the
+  # `init` guard. `fallback: false`: where snapd is not running, dot must not fall back to apt
+  # under the same name (Debian's `slack` is an unrelated configuration tool); the step fails,
+  # saying snapd is missing.
+  - label: Install Slack
+    when: { os: linux, init: systemd }
+    package:
+      snap: [{ name: slack, fallback: false }]
+
+  - label: Install Slack
+    when: { os: [macos, windows] }
+    package:
+      cask: [slack]
+      winget: [SlackTechnologies.Slack]

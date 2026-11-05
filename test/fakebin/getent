@@ -1,0 +1,12 @@
+#!/bin/sh
+# Fake getent (Linux account queries). `passwd <user>`: the login shell is $FAKE_STATE/shell.<user>
+# (default /bin/bash, as on a fresh Ubuntu). `group <name>`: a line of $FAKE_STATE/group.
+echo "getent $*" >> "$FAKE_LOG"
+case "$1" in
+  passwd)
+    sh=$(cat "$FAKE_STATE/shell.$2" 2>/dev/null || echo /bin/bash)
+    echo "$2:x:1000:1000::/home/$2:$sh" ;;
+  group)
+    grep "^$2:" "$FAKE_STATE/group" 2>/dev/null || exit 2 ;;
+  *) exit 2 ;;
+esac

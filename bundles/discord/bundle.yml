@@ -1,0 +1,27 @@
+# yaml-language-server: $schema=https://github.com/trungngo/dot-cli/releases/latest/download/bundle.schema.json
+#
+# Discord, the voice and text chat app. Linux: Discord's own .deb (x86_64; it sets up no apt
+# repository); macOS the cask, Windows winget. Opt-in: no profile selects it
+# (`dot apply discord`). Nothing is linked: Discord keeps its settings with your account.
+# See README.md.
+name: discord
+description: Discord chat (opt-in)
+requires: [common]
+when: { role: desktop }
+
+steps:
+  # The API URL redirects to the current versioned .deb on dl.discordapp.net. Discord publishes
+  # no arm64 build for Linux. The .deb adds no apt source, and the Linux client does not update
+  # itself (it offers the new .deb on launch), so updates come from this step: dot re-downloads
+  # when Discord's server reports a changed file.
+  - label: Install Discord (.deb from Discord)
+    when: { os: linux, family: debian, arch: x86_64 }
+    download:
+      url: https://discord.com/api/download?platform=linux&format=deb
+      package: discord
+
+  - label: Install Discord
+    when: { os: [macos, windows] }
+    package:
+      cask: [discord]
+      winget: [Discord.Discord]
