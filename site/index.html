@@ -112,10 +112,11 @@
   }
   .pill b { color: var(--ok); font-weight: 600; }
   .install-line {
-    margin-top: 36px; background: var(--surface); border: 1px solid var(--line);
+    margin-top: 14px; background: var(--surface); border: 1px solid var(--line);
     border-radius: var(--radius); padding: 14px 16px; display: flex; gap: 12px; align-items: center;
     max-width: 980px; overflow: hidden;
   }
+  .install-line[hidden] { display: none; }
   .install-line .prompt { color: var(--muted); user-select: none; }
   .install-line code {
     background: none; padding: 0; flex: 1; overflow-x: auto; white-space: nowrap;
@@ -249,12 +250,21 @@
       <a class="btn" href="https://github.com/trungngo/fresh-boot">View on GitHub</a>
     </div>
 
-    <div class="install-line" role="group" aria-label="Install command">
+    <div class="tabs" role="tablist" aria-label="Platform">
+      <button role="tab" data-os="sh" aria-selected="true">macOS / Linux</button>
+      <button role="tab" data-os="ps" aria-selected="false">Windows</button>
+    </div>
+    <div class="install-line" data-os-panel="sh" role="group" aria-label="Install command for macOS and Linux">
       <span class="prompt mono">$</span>
       <code id="one-liner">curl -fsSL https://raw.githubusercontent.com/trungngo/fresh-boot/main/install/install.sh | sh</code>
       <button class="copy" type="button" data-copy="#one-liner">Copy</button>
     </div>
-    <p class="note">macOS and Ubuntu / Debian. Windows: <a href="#install">PowerShell command below</a>. No GitHub login, token or account needed.</p>
+    <div class="install-line" data-os-panel="ps" role="group" aria-label="Install command for Windows" hidden>
+      <span class="prompt mono">PS&gt;</span>
+      <code id="one-liner-ps">irm https://raw.githubusercontent.com/trungngo/fresh-boot/main/install/windows.ps1 | iex</code>
+      <button class="copy" type="button" data-copy="#one-liner-ps">Copy</button>
+    </div>
+    <p class="note">macOS and Ubuntu / Debian, or Windows PowerShell. No GitHub login, token or account needed.</p>
   </div>
 </section>
 
@@ -336,11 +346,11 @@
       changes anything, and asks once for your name, e-mail and this machine's short name.</p>
 
     <div class="tabs" role="tablist" aria-label="Platform">
-      <button role="tab" aria-selected="true" aria-controls="tab-sh" id="btn-sh">macOS / Linux</button>
-      <button role="tab" aria-selected="false" aria-controls="tab-ps" id="btn-ps">Windows</button>
+      <button role="tab" data-os="sh" aria-selected="true" aria-controls="tab-sh" id="btn-sh">macOS / Linux</button>
+      <button role="tab" data-os="ps" aria-selected="false" aria-controls="tab-ps" id="btn-ps">Windows</button>
     </div>
 
-    <div class="tab-panel" id="tab-sh" role="tabpanel" aria-labelledby="btn-sh">
+    <div class="tab-panel" data-os-panel="sh" id="tab-sh" role="tabpanel" aria-labelledby="btn-sh">
 <pre># Install and apply the default set
 curl -fsSL https://raw.githubusercontent.com/trungngo/fresh-boot/main/install/install.sh | sh
 
@@ -351,7 +361,7 @@ curl -fsSL https://raw.githubusercontent.com/trungngo/fresh-boot/main/install/in
 curl -fsSL https://raw.githubusercontent.com/trungngo/fresh-boot/main/install/install.sh | FRESH_BOOT_ROLE=server sh</pre>
     </div>
 
-    <div class="tab-panel" id="tab-ps" role="tabpanel" aria-labelledby="btn-ps" hidden>
+    <div class="tab-panel" data-os-panel="ps" id="tab-ps" role="tabpanel" aria-labelledby="btn-ps" hidden>
 <pre># Windows PowerShell 5.1 or PowerShell 7
 irm https://raw.githubusercontent.com/trungngo/fresh-boot/main/install/windows.ps1 | iex</pre>
     </div>
@@ -436,17 +446,20 @@ irm https://raw.githubusercontent.com/trungngo/fresh-boot/main/install/windows.p
     });
   });
 
-  // macOS / Windows tabs.
-  var tabs = document.querySelectorAll('[role="tab"]');
-  tabs.forEach(function (tab) {
-    tab.addEventListener('click', function () {
-      tabs.forEach(function (t) {
-        var on = t === tab;
-        t.setAttribute('aria-selected', on ? 'true' : 'false');
-        document.getElementById(t.getAttribute('aria-controls')).hidden = !on;
-      });
+  // macOS / Linux and Windows tabs: every tab group on the page switches together, and a
+  // Windows visitor starts on the Windows command.
+  function showOs(os) {
+    document.querySelectorAll('[role="tab"]').forEach(function (t) {
+      t.setAttribute('aria-selected', t.getAttribute('data-os') === os ? 'true' : 'false');
     });
+    document.querySelectorAll('[data-os-panel]').forEach(function (p) {
+      p.hidden = p.getAttribute('data-os-panel') !== os;
+    });
+  }
+  document.querySelectorAll('[role="tab"]').forEach(function (tab) {
+    tab.addEventListener('click', function () { showOs(tab.getAttribute('data-os')); });
   });
+  if (/Win/i.test(navigator.platform || navigator.userAgent || '')) showOs('ps');
 </script>
 </body>
 </html>

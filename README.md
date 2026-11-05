@@ -1,5 +1,13 @@
 # fresh-boot
 
+**macOS / Ubuntu:**
+
+    curl -fsSL https://raw.githubusercontent.com/trungngo/fresh-boot/main/install/install.sh | sh
+
+**Windows** (PowerShell):
+
+    irm https://raw.githubusercontent.com/trungngo/fresh-boot/main/install/windows.ps1 | iex
+
 One command on a new machine installs the software you use and sets it up. fresh-boot is a set
 of **bundles** (git, zsh, tmux, vim, Ghostty, Tailscale, the GitHub and GitLab CLIs, plus
 dozens of opt-in ones) for macOS, Ubuntu desktop, Ubuntu server and Windows, driven by
