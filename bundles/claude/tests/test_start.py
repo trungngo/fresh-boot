@@ -41,6 +41,9 @@ class Start(ClaudeCase):
         i = argv.index(str(self.bin / "claude"))
         self.assertEqual(argv[i + 1:i + 7], ["--session-id", j["uuid"], "--remote-control",
                                              j["name"], "-n", j["name"]])
+        # The session cds into the repo itself: the server's own cwd may be gone.
+        self.assertEqual(argv[i - 5:i], ["sh", "-c", 'cd "$1" && shift && exec "$@"',
+                                         "tn-claude", str(self.repo)])
         opts = self.tmux_state()["claude-acme-shop-web-02"]["options"]
         self.assertEqual(opts, {"@claude_name": j["name"], "@claude_dir": str(self.repo),
                                 "@claude_uuid": j["uuid"], "@tn_context": "acme/shop-web@02",

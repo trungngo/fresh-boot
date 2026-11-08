@@ -546,7 +546,11 @@ def _launch(ctx, args, force=None) -> dict:
     # Each option names the new session: with no -t, tmux sets it on the session tn runs in. The
     # colon matters too: set-option's target is a pane, and a bare "=name" finds nothing.
     target = "=%s:" % tmux_name
-    argv += [claude_bin, *cargs,
+    # -c alone is not enough: a long-lived server whose own cwd went bad starts its children
+    # where getcwd() fails, and Claude exits ("The current directory no longer exists"). An
+    # explicit cd inside the session fixes that; argv stays a list, so nothing is re-quoted.
+    argv += ["sh", "-c", 'cd "$1" && shift && exec "$@"', "tn-claude", str(directory),
+             claude_bin, *cargs,
              ";", "set-option", "-t", target, "@claude_name", title,
              ";", "set-option", "-t", target, "@claude_dir", str(directory),
              ";", "set-option", "-t", target, "@claude_uuid", uuid,
