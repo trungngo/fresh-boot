@@ -64,13 +64,18 @@ steps:
   # ghostty bundle; or `infocmp -x $TERM | ssh host -- tic -x -`). Until it is there, fall back
   # to xterm-256color, which every box has. ~/.zshenv runs before ~/.zshrc, so everything starts
   # up with it; a known TERM is never touched. A managed block: the rest of ~/.zshenv is kept.
-  - label: Known terminal type for interactive logins
+  - label: Known terminal type and locale for ssh logins
     when: { os: linux }
     block:
       file: ~/.zshenv
       content: |
         if [[ -o interactive ]] && ! infocmp "$TERM" >/dev/null 2>&1; then
             export TERM=xterm-256color
+        fi
+        # macOS sets LC_CTYPE=UTF-8 and its ssh_config sends LC_* along; Linux has no locale
+        # by that bare name ("Cannot set LC_CTYPE to default locale"). C.UTF-8 is always there.
+        if [[ $LC_CTYPE == UTF-8 ]]; then
+            export LC_CTYPE=C.UTF-8
         fi
 
   # Machine-local overrides, sourced last by zshrc; never tracked, never overwritten.

@@ -31,7 +31,9 @@ is Homebrew's newer build (the old repo's choice, kept).
   `xterm-256color`; a known `TERM` is never touched. Without an entry, zsh, Claude Code, vim and
   tmux mis-handle completion, keys and paste. The proper fix is the entry: Ghostty installs it on
   `ssh` (`shell-integration-features = ssh-terminfo`, ghostty bundle), or by hand:
-  `infocmp -x xterm-ghostty | ssh host -- tic -x -`. The rest of `~/.zshenv` is left alone.
+  `infocmp -x xterm-ghostty | ssh host -- tic -x -`. The same block turns `LC_CTYPE=UTF-8`
+  (macOS's value, which ssh from a Mac forwards) into `C.UTF-8`: Linux has no locale by the bare
+  name and warns "Cannot set LC_CTYPE to default locale". The rest of `~/.zshenv` is left alone.
 - `~/.local.zshrc`: created empty, never tracked, never overwritten; sourced last, so it wins.
 - `~/.config/zsh/conf.d/`: created; other bundles link `<name>.zsh` here. Dangling links in it
   (a bundle file renamed or deleted) are removed by a `clean` step, and zshrc skips them anyway.
