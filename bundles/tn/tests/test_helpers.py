@@ -248,6 +248,19 @@ class Fs(Captured):
         self.assertFalse((self.tmp / "a").exists())
 
 
+    def test_write_follows_a_symlink(self):
+        if os.name == "nt":
+            self.skipTest("symlinks need privileges on Windows")
+        real = self.tmp / "checkout" / "config.toml"
+        real.parent.mkdir()
+        real.write_text("old\n")
+        link = self.tmp / "config.toml"
+        link.symlink_to(real)
+        fs.write_text(link, "new\n")
+        self.assertTrue(link.is_symlink())
+        self.assertEqual(real.read_text(), "new\n")
+
+
 class Match(TnTestCase):
     def test_tiers(self):
         items = ["claude-hatch", "claude-hat", "other-hat"]
@@ -259,6 +272,34 @@ class Match(TnTestCase):
         self.assertEqual(match(None, items, k), items)
         self.assertTrue(subsequence("asv", "acme/sv-app"))
         self.assertFalse(subsequence("vsh", "shop"))
+
+
+class OuterEnvironment(TnTestCase):
+    """What the runner's shell exports never reaches a test (tmux, ssh, a Claude session)."""
+
+    LEAKS = {"CLAUDECODE": "1", "CLAUDE_CODE_CHILD_SESSION": "1", "SSH_CONNECTION": "1 2 3 4",
+             "SSH_AUTH_SOCK": "/tmp/agent.sock", "DISPLAY": ":0", "TMUX": "/tmp/tmux-1/x,1,0",
+             "EDITOR": "nano", "GIT_DIR": "/elsewhere/.git", "XDG_RUNTIME_DIR": "/run/user/1",
+             "SOME_TOKEN": "x"}
+
+    def setUp(self):
+        saved = {k: os.environ.get(k) for k in self.LEAKS}
+
+        def restore():
+            for k, v in saved.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+        self.addCleanup(restore)
+        os.environ.update(self.LEAKS)
+        super().setUp()
+
+    def test_outer_variables_are_dropped(self):
+        for k in self.LEAKS:
+            self.assertNotIn(k, os.environ, k)
+        r = self.tn("status", "--json")
+        self.assertExit(r, 0)
 
 
 class TestingHelpers(TnTestCase):

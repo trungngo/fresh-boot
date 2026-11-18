@@ -86,12 +86,24 @@ def list_sessions(timeout: float | None = 10) -> list[TmuxSession]:
     return parse_sessions(r.stdout)
 
 
+def _tmux_arg(value: str) -> str:
+    """``value`` as one literal tmux argument. tmux ends a command at ANY argument ending in
+    ";" and drops the ";", so ``-t =foo;`` would name session ``foo``; a trailing "\\;" stands
+    for a literal ";"."""
+    return value[:-1] + "\\;" if value.endswith(";") else value
+
+
+def _target(name: str) -> str:
+    """``=<name>``: tmux's exact-match form of a session target."""
+    return _tmux_arg("=" + name)
+
+
 def has_session(name: str) -> bool:
-    return capture(["tmux", "has-session", "-t", "=" + name], timeout=10).returncode == 0
+    return capture(["tmux", "has-session", "-t", _target(name)], timeout=10).returncode == 0
 
 
 def session_path(name: str) -> str | None:
-    r = capture(["tmux", "display-message", "-p", "-t", "=" + name, "#{session_path}"],
+    r = capture(["tmux", "display-message", "-p", "-t", _target(name), "#{session_path}"],
                 timeout=10)
     p = r.stdout.strip() if r.returncode == 0 else ""
     return p or None
@@ -138,9 +150,9 @@ def _no_json(ctx: Context, what: str) -> None:
 def _join(name: str) -> int | None:
     """Put this terminal on session ``name``: switch-client inside tmux, else hand off."""
     if inside_tmux():
-        run(["tmux", "switch-client", "-t", "=" + name])
+        run(["tmux", "switch-client", "-t", _target(name)])
         return 0
-    handoff(["tmux", "attach-session", "-t", "=" + name])
+    handoff(["tmux", "attach-session", "-t", _target(name)])
 
 
 def _select(query: str | None, sessions: list[TmuxSession], *, prompt: str,
@@ -205,15 +217,15 @@ def new(ctx: Context, args) -> int | None:
         return _join(name)
 
     if args.detach:
-        run(["tmux", "new-session", "-d", "-s", name, "-c", d])
+        run(["tmux", "new-session", "-d", "-s", _tmux_arg(name), "-c", _tmux_arg(d)])
         out.result({"name": name, "dir": d, "created": True}, text=lambda o: o["name"])
         return 0
     if inside_tmux():
         # Nesting a client inside tmux is refused; create it detached, then move this client.
-        run(["tmux", "new-session", "-d", "-s", name, "-c", d])
-        run(["tmux", "switch-client", "-t", "=" + name])
+        run(["tmux", "new-session", "-d", "-s", _tmux_arg(name), "-c", _tmux_arg(d)])
+        run(["tmux", "switch-client", "-t", _target(name)])
         return 0
-    handoff(["tmux", "new-session", "-s", name, "-c", d])
+    handoff(["tmux", "new-session", "-s", _tmux_arg(name), "-c", _tmux_arg(d)])
 
 
 @plugin.command(help="join a session in this terminal (pick when no name)")
@@ -283,8 +295,9 @@ def kill(ctx: Context, args) -> int | None:
 
     killed = []
     for s in victims:
-        run(["tmux", "kill-session", "-t", "=" + s.name])
-        out.info("killed %s" % s.name)
+        run(["tmux", "kill-session", "-t", _target(s.name)])
+        if not ctx.options.dry_run:
+            out.info("killed %s" % s.name)
         if s.kind == "claude" and not args.all:
             out.hint("that was a Claude session; `tn claude stop` also prints how to resume it")
         killed.append({"name": s.name, "killed": True})

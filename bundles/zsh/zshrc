@@ -45,7 +45,40 @@ if command -v dot >/dev/null; then
 fi
 
 _zsh_cache=${XDG_CACHE_HOME:-$HOME/.cache}/zsh
-[[ -d $_zsh_cache ]] || mkdir -p "$_zsh_cache"
+[[ -d $_zsh_cache/init ]] || mkdir -p "$_zsh_cache/init"
+
+# zshrc_cached [--dep FILE]... [--as NAME] COMMAND [ARG]...: the shell code COMMAND prints (a
+# completion, an init script), kept in ~/.cache/zsh/init (as NAME: `--as _uv` for a completion
+# function to autoload from there) and its path left in $REPLY; usage:
+#   zshrc_cached gh completion -s zsh && source "$REPLY"
+# Running them all on every start took more than a second (gh, glab, docker, uv, tn). The file
+# is written again only when the executable (symlinks resolved) or a --dep file changed: its
+# path, size, mtime or ctime (dpkg keeps a package's mtimes, so an upgrade can carry an older
+# one). Returns 1, caching nothing, when COMMAND is missing or fails. Never for output that
+# differs per shell (fnm env names a per-shell directory).
+zmodload -F zsh/stat b:zstat 2>/dev/null
+zshrc_cached() {
+    local -a deps st
+    local dep sig= line out cache name
+    while [[ $1 == --(dep|as) ]]; do
+        if [[ $1 == --dep ]]; then deps+=("$2"); else name=$2; fi
+        shift 2
+    done
+    (( $+commands[$1] )) || return 1
+    deps=("${commands[$1]:A}" $deps)
+    cache=${XDG_CACHE_HOME:-$HOME/.cache}/zsh/init/${name:-${${(j:-:)@}//[^A-Za-z0-9_.-]/_}.zsh}
+    REPLY=$cache
+    if (( $+builtins[zstat] )); then
+        for dep in $deps; do
+            st=()
+            zstat -A st -- "$dep" 2>/dev/null
+            sig+=" $dep:${st[8]}:${st[10]}:${st[11]}"
+        done
+        [[ -r $cache ]] && IFS= read -r line < "$cache" && [[ $line == "#$sig" ]] && return 0
+    fi
+    out=$("$@" 2>/dev/null) || return 1
+    print -r -- "#$sig"$'\n'"$out" >| "$cache.$$" && mv -f -- "$cache.$$" "$cache"
+}
 
 # --- 2. zsh options and history -------------------------------------------------------------
 
@@ -119,7 +152,23 @@ bindkey '^x^e' edit-command-line
 
 autoload -Uz compinit
 # -i: skip (not prompt about) group-writable directories, which Homebrew's often are.
-compinit -i -d "$_zsh_cache/zcompdump-$ZSH_VERSION"
+# A full compinit scans and audits every $fpath directory, most of a shell start; -C loads the
+# dump as it is. Full when the last full run is a day old, $fpath is not the list it saw, or a
+# directory in it changed since (installing or removing a completion changes its directory).
+# The stamp file holds that $fpath; its mtime is the run's time (compinit may keep the dump).
+_zcompdump=$_zsh_cache/zcompdump-$ZSH_VERSION
+_zcompfull=1
+if [[ -s $_zcompdump && -r $_zcompdump.fpath ]] && IFS= read -r _zcompline < "$_zcompdump.fpath" &&
+   [[ $_zcompline == ${(j.:.)fpath} ]]; then
+    _zcompfull=($_zcompdump.fpath(N.mh+23))
+    for _d in $fpath; do [[ $_d -nt $_zcompdump.fpath ]] && _zcompfull=1 && break; done
+fi
+if (( $#_zcompfull )); then
+    compinit -i -d "$_zcompdump" && print -r -- "${(j.:.)fpath}" >| "$_zcompdump.fpath"
+else
+    compinit -C -d "$_zcompdump"
+fi
+unset _zcompdump _zcompfull _zcompline _d
 
 zmodload -i zsh/complist
 setopt complete_in_word always_to_end
@@ -135,8 +184,8 @@ zstyle ':completion:*:*:kill:*:processes' list-colors '=(#b) #([0-9]#) ([0-9a-z-
 
 # Tools with no bundle of their own (docker is opt-in, kubectl comes from anywhere); both
 # print their own completion, which is what oh-my-zsh's plugins sourced.
-command -v docker >/dev/null && source <(docker completion zsh 2>/dev/null)
-command -v kubectl >/dev/null && source <(kubectl completion zsh 2>/dev/null)
+zshrc_cached docker completion zsh && source "$REPLY"
+zshrc_cached kubectl completion zsh && source "$REPLY"
 
 # --- 5. aliases and functions ---------------------------------------------------------------
 
@@ -180,8 +229,9 @@ reload() {
 # starship (zsh bundle: github_release on Linux, brew on macOS), default config. Until it is
 # installed, a plain prompt close to oh-my-zsh's robbyrussell.
 
-if command -v starship >/dev/null; then
-    eval "$(starship init zsh)"
+# --print-full-init: what `starship init zsh` sources through a second starship process.
+if zshrc_cached starship init zsh --print-full-init; then
+    source "$REPLY"
 else
     PROMPT='%(?:%F{green}➜:%F{red}➜) %F{cyan}%1~%f '
 fi

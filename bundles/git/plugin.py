@@ -127,6 +127,13 @@ def _check_remote(root, name: str) -> str:
     return name
 
 
+def _rev_arg(value: str, what: str) -> str:
+    """A revision the user typed, refused when git would read it as an option (``--output=``)."""
+    if value.startswith("-"):
+        raise UsageError("invalid %s %r: it starts with '-'" % (what, value))
+    return value
+
+
 def _ref_exists(root, ref: str) -> bool:
     return git(root, "rev-parse", "--verify", "--quiet", ref + "^{commit}").returncode == 0
 
@@ -509,7 +516,7 @@ def ignore(ctx, args):
         if n not in wanted:
             wanted.append(n)
     f = Path(root) / ".gitignore"
-    existing = f.read_text(encoding="utf-8") if f.is_file() else ""
+    existing = f.read_text(encoding="utf-8", errors="replace") if f.is_file() else ""
     have = {line.strip() for line in existing.splitlines()}
     added, skipped, blocks = [], [], []
     for n in wanted:
@@ -553,6 +560,8 @@ def log(ctx, args):
     root = _root(ctx)
     if args.max_count < 1:
         raise UsageError("--max-count must be at least 1")
+    if args.range is not None:
+        _rev_arg(args.range, "range")
     if args.range is None and not _ref_exists(root, "HEAD"):
         out.records([], [], empty="No commits yet.")
         return
@@ -664,7 +673,7 @@ def authors(ctx, args):
      help="the zip file (required outside a project repo)")
 def export(ctx, args):
     root = _root(ctx)
-    r = git(root, "rev-parse", "--verify", "--quiet", args.ref + "^{commit}")
+    r = git(root, "rev-parse", "--verify", "--quiet", _rev_arg(args.ref, "ref") + "^{commit}")
     commit = _out(r)
     if r.returncode != 0 or not commit:
         raise UsageError("unknown ref %r" % args.ref)
@@ -685,7 +694,7 @@ def export(ctx, args):
         if not confirm("overwrite %s?" % f):
             raise Cancelled()
     fs.mkdir(f.parent)
-    run(["git", "-C", str(root), "archive", "--format=zip", "-o", str(f), args.ref], quiet=True)
+    run(["git", "-C", str(root), "archive", "--format=zip", "-o", str(f), commit], quiet=True)
     size = f.stat().st_size if (not ctx.options.dry_run and f.is_file()) else None
     out.result({"file": str(f), "ref": args.ref, "commit": commit, "bytes": size},
                text=lambda o: o["file"])
@@ -694,9 +703,10 @@ def export(ctx, args):
 # == feature branches =======================================================================
 
 
-def _base(root) -> str | None:
+def _base(root, primary: str | None = None) -> str | None:
     """``develop`` (local, else on the primary remote), else the default branch."""
-    primary = _primary_remote(root)
+    if primary is None:
+        primary = _primary_remote(root)
     for name in ("develop", projects.default_branch(root)):
         if not name:
             continue
@@ -723,7 +733,7 @@ def feature_new(ctx, args):
     if _ref_exists(root, "refs/heads/" + branch):
         raise Fail("branch %s already exists" % branch, hint="git switch %s" % branch)
     if args.from_:
-        if not _ref_exists(root, args.from_):
+        if not _ref_exists(root, _rev_arg(args.from_, "branch or ref")):
             raise UsageError("unknown branch or ref %r" % args.from_)
         base = args.from_
     else:
@@ -759,7 +769,7 @@ def feature_ls(ctx, args):
                 if n not in remote or rn == primary:
                     remote[n] = (rn, ref, date)
                 break
-    base = _base(root)
+    base = _base(root, primary)
     rows = []
     for n in sorted(set(local) | set(remote)):
         ref, date = local[n] if n in local else remote[n][1:]

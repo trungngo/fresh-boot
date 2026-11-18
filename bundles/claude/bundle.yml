@@ -14,7 +14,9 @@ steps:
   - label: Install Claude Code
     when: { os: [linux, macos] }
     shell:
-      cmd: curl -fsSL https://claude.ai/install.sh | bash
+      # Downloaded whole, then run: `curl | bash` runs whatever part arrived when the
+      # connection drops, and reports success when curl fails.
+      cmd: s=$(curl -fsSL https://claude.ai/install.sh) && bash -c "$s"
       unless: command -v claude
       upgrade: claude update
 

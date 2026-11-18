@@ -33,6 +33,12 @@ class ProjNew(ProjectsCase):
                                 "identity": "alex-work"})
         self.assertEqual(r.json["config"]["forge"], "work")
 
+    def test_tn_toml_values_are_escaped(self):
+        group = 'a "b" \\ c\nidentity = "x"'
+        self.ok(self.tn("proj", "new", "esc", "--group", group, "--json"))
+        data = tomllib.loads((self.projects / "esc" / "tn.toml").read_text())
+        self.assertEqual(data, {"group": group})
+
     def test_proj_dirs_from_config(self):
         self.config('[proj]\ndirs = ["src", "docs"]\n')
         self.ok(self.tn("proj", "new", "p1"))

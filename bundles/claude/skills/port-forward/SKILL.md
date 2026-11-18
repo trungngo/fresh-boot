@@ -51,7 +51,8 @@ it forwards the project's `[tunnel] ports` from its `tn.toml`, when that is set.
 open the link, say that it needs `--public` and what that means, then let the user choose.
 Examples: "send this to the client", "point Stripe's webhook at it", "my phone won't log in".
 `--public` is per forward and never remembered. So an existing private forward must be closed and
-opened again to become public.
+opened again to become public, and an existing public one stays public when reused without
+`--public` (it warns): read `access`, and say so.
 
 A private link is useless to `curl` and to API clients, because the sign-in is a browser
 redirect. For a non-browser client on a private tunnel, issue a token instead:

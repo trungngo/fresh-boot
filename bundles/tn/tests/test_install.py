@@ -82,6 +82,13 @@ class TnCmdIgnoresTheCurrentDirectory(TnTestCase):
                            env=env, capture_output=True, text=True)
         self.assertIn("project tn", p.stderr)
 
+    def test_no_empty_pythonpath_entry(self):
+        # "lib;" with nothing after it is an empty entry, which Python reads as the current
+        # directory, ahead of the standard library, even under -P.
+        text = TN_CMD.read_text(encoding="utf-8")
+        self.assertIn('set "PYTHONPATH=%TN_HOME%\\lib"', text)
+        self.assertIn("if defined PYTHONPATH (", text)
+
 
 def _steps(text: str) -> list:
     """(label, body) of each step in bundle.yml, in order (stdlib only: no YAML parser)."""

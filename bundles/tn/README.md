@@ -11,7 +11,7 @@ plugin per bundle**, copied in by that bundle. The full command specification is
 | `~/.local/share/tn/lib/tn/` | the core library, the Python package `tn` | `copy` of `lib/tn` (a directory copy: files deleted here are pruned) |
 | `~/.local/bin/tn` | Unix entry point (`#!/usr/bin/env python3`, mode 0755) | `copy` of `bin/tn`, Linux and macOS |
 | `~/.local/bin/tn.cmd` | Windows entry point (`py -3 -P -m tn`) | `copy` of `bin/tn.cmd`, Windows |
-| `~/.config/zsh/conf.d/tn.zsh` | `eval "$(tn shell init zsh)"`: the `tn` shell function and completion | `link` |
+| `~/.config/zsh/conf.d/tn.zsh` | the output of `tn shell init zsh` (the `tn` shell function and completion), cached by zshrc's `zshrc_cached` | `link` |
 | `$PROFILE` block | the same for PowerShell (`tn.cmd shell init pwsh`) | `block` in `{{ documents }}/PowerShell/Microsoft.PowerShell_profile.ps1` |
 | (removed) `~/.scripts`, `~/.config/zsh/conf.d/scripts.zsh` | links left by the deleted `scripts` bundle on upgraded machines | `absent` with `only: link` (Linux, macOS) |
 
@@ -99,7 +99,16 @@ executables on PATH, `self.tn(...)` in process). Run everything with `test/tn-te
   into it (a few MB); deleting `~/.cache/tn/pycache` is always safe.
   `test/tn-tests.sh` runs with `PYTHONDONTWRITEBYTECODE=1`, so it leaves none behind.
 - `tn.cmd` runs `py -3 -P -m tn`: `-m` would otherwise put the current directory first on
-  `sys.path`, and a project with its own `tn.py` or `tn/` would be imported instead of tn.
+  `sys.path`, and a project with its own `tn.py` or `tn/` would be imported instead of tn. It
+  sets `PYTHONPATH` to the library alone when none was set: `lib;` ends in an empty entry,
+  which Python reads as the current directory (ahead of the standard library, `-P` or not).
+  `bin/tn` likewise drops its own directory (`~/.local/bin`) from `sys.path`.
+- A config file tn writes (`tn config set`, `tn config set machine`) that is a symlink stays
+  one: the write replaces the link's target, atomically.
+- Tests (`TnTestCase`) rebuild the environment from scratch instead of inheriting the runner's
+  (`_KEEP` in `testing.py`: locale, temp dir, Python and Windows system variables), so a suite
+  run inside tmux, over ssh or from a Claude session sees what a clean shell would. A test that
+  needs `DISPLAY`, `SSH_CONNECTION`, `TMUX`, ... passes it with `self.tn(..., env={...})`.
 - The index is cached in `~/.cache/tn/index.json` by path, mtime and size; deleting it is
   always safe.
 - Colour follows `NO_COLOR`, `--no-color`, `TERM=dumb` and whether the stream is a TTY; JSON is

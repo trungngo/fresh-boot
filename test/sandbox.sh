@@ -53,9 +53,11 @@ shift
 
 sandbox=${SANDBOX:-${TMPDIR:-/tmp}/dot-sandbox}
 case "$sandbox" in
-  /*) ;;
-  *) echo "SANDBOX must be an absolute path" >&2; exit 2 ;;
+  /?*) ;;
+  *) echo "SANDBOX must be an absolute path below /" >&2; exit 2 ;;
 esac
+# RESET=1 wipes it, and its home/ stands in for $HOME: never $HOME itself or a directory above.
+case "${HOME:-}/" in "${sandbox%/}"/*) echo "SANDBOX must not be \$HOME or above it" >&2; exit 2 ;; esac
 [ "${RESET:-0}" = 1 ] && rm -rf "$sandbox"
 mkdir -p "$sandbox/home/.config/dot" "$sandbox/state" "$sandbox/root/etc"
 # /etc/shells as a fresh machine has it (the `user` directive adds a shell it lacks).

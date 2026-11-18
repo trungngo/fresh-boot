@@ -31,6 +31,12 @@ class Ignore(GitCase):
         self.assertTrue(text.startswith("*.log\n\n### Python (github/gitignore)\n"))
         self.assertEqual(text.count("### Python"), 1)
 
+    def test_gitignore_that_is_not_utf8(self):
+        (self.r / ".gitignore").write_bytes(b"caf\xe9\n")
+        r = self.ok(self.tn("git", "ignore", "go", "--json", cwd=self.r))
+        self.assertEqual(r.json["added"], ["Go"])
+        self.assertTrue((self.r / ".gitignore").read_bytes().startswith(b"caf\xe9\n"))
+
     def test_unknown_template(self):
         r = self.tn("git", "ignore", "pythn", "--json", cwd=self.r)
         self.assertExit(r, 2)
@@ -100,6 +106,13 @@ class Log(GitCase):
         r = self.ok(self.tn("git", "log", cwd=self.r))
         self.assertTrue(r.stdout.startswith("COMMIT"))
         self.assertExit(self.tn("git", "log", "nope..HEAD", cwd=self.r), 2)
+
+    def test_a_range_is_never_an_option(self):
+        # `git log --output=<file>` would write that file.
+        f = self.tmp / "written"
+        r = self.tn("git", "log", "--json", "--", "--output=%s" % f, cwd=self.r)
+        self.assertExit(r, 2)
+        self.assertFalse(f.exists())
 
     def test_no_commits(self):
         d = self.home / "empty"

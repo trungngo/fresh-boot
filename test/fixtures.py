@@ -2,7 +2,10 @@
 """Local stand-in for the release APIs and downloads the bundles use, for sandbox applies
 (test/converge.sh). Never touches the network; every artifact is a small stub made here.
 
-    python3 test/fixtures.py <port>
+    python3 test/fixtures.py <port> [<port file>]
+
+Port 0 takes a free one (so concurrent test/converge.sh runs never meet each other's server);
+the port it listens on is written to <port file> once it accepts connections.
 
 Serves, on 127.0.0.1:<port>:
   /gh/repos/<owner>/<repo>/releases/latest     GitHub API (DOT_GITHUB_API=http://127.0.0.1:<port>/gh)
@@ -27,6 +30,7 @@ import hashlib
 import http.server
 import io
 import json
+import os
 import sys
 import tarfile
 import zipfile
@@ -208,4 +212,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         pass
 
 
-http.server.ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()
+server = http.server.ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
+if len(sys.argv) > 2:
+    with open(sys.argv[2] + ".tmp", "w") as f:
+        f.write(f"{server.server_address[1]}\n")
+    os.replace(sys.argv[2] + ".tmp", sys.argv[2])
+server.serve_forever()

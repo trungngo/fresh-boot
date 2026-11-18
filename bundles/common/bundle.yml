@@ -15,7 +15,8 @@ steps:
   - label: Install Homebrew
     when: { os: macos }
     shell:
-      cmd: /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+      # Not `bash -c "$(curl ...)"`: when curl fails that runs an empty script and succeeds.
+      cmd: s=$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh) && /bin/bash -c "$s"
       unless: command -v brew || test -x "{{ homebrew_prefix }}/bin/brew"
       interactive: true
 

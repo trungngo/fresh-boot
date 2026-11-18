@@ -87,6 +87,28 @@ class Resume(ClaudeCase):
         self.assertEqual(reg["claude-acme-shop-web-03"]["account"], "me@example.com")
         self.assertNotIn("stopped", reg["claude-acme-shop-web-00"])
 
+    def test_all_asks_for_the_account_once(self):
+        # The account each resumed session is recorded on is the one resume already read:
+        # not one `claude auth status` per session.
+        self.seed_registry(self.entry("src", U1), self.entry("src-01", U2))
+        self.transcript("src", U1, ABRUPT)
+        self.transcript("src-01", U2, ABRUPT)
+        r = self.resume("--all", "--json")
+        self.assertEqual([x["resumed"] for x in r.json], [True, True])
+        self.assertEqual(self.calls("claude").count(["auth", "status", "--json"]), 1)
+        self.assertEqual({e["account"] for e in self.registry()}, {"me@example.com"})
+
+    def test_transcript_end_reads_from_the_end(self):
+        # Only the last message / cost-state row decides; a row may straddle read blocks.
+        self.transcript("src", U1, ["cost-state"] + ["user", "assistant"] * 50 + ["cost-state"])
+        self.assertTrue(claude._transcript_end(self.dirs["src"], U1)[0])
+        self.transcript("src", U1, ["cost-state", "user"] + ["junk"] * 50)
+        self.assertFalse(claude._transcript_end(self.dirs["src"], U1)[0])
+        p = self.transcripts(self.dirs["src"]) / (U1 + ".jsonl")
+        with p.open("rb") as f:
+            lines = list(claude._lines_backwards(f, block=7))
+        self.assertEqual(lines, list(reversed(p.read_bytes().splitlines())))
+
     def test_running_session_is_left_alone(self):
         self.seed_registry(self.entry("src", U1))
         self.transcript("src", U1, ABRUPT)

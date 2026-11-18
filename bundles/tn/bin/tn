@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
 import os, sys
+# sys.path[0] is this script's directory (~/.local/bin): a stray json.py or re.py there would
+# shadow the standard library. tn imports nothing from it, so it goes before any other import.
+if sys.path and sys.argv and sys.argv[0] and \
+        os.path.realpath(sys.path[0] or ".") == os.path.dirname(os.path.realpath(sys.argv[0])):
+    del sys.path[0]
 from pathlib import Path
 if sys.version_info < (3, 11):
     # `env python3` found an old interpreter (macOS /usr/bin/python3 is 3.9, and a shell opened
@@ -22,6 +27,10 @@ if sys.version_info < (3, 11):
     sys.stderr.write("tn: needs Python 3.11 or later (this is %d.%d)\n"
                      "  run: dot apply common   (then open a new terminal)\n" % sys.version_info[:2])
     sys.exit(3)
+# The hand-over marker is for this process only: left in the environment, every program tn
+# starts (a tmux server, a shell in it) would pass it on, and a tn run there under an old
+# python3 would no longer look for a newer one.
+os.environ.pop("TN_REEXEC", None)
 home = Path(os.environ.get("TN_HOME") or Path.home() / ".local/share/tn")
 # Bytecode goes to the cache, never next to the copied sources: dot owns ~/.local/share/tn, and
 # a __pycache__ there would be drift it copies over and a leftover `dot remove` cannot see.

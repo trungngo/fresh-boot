@@ -37,7 +37,11 @@ is Homebrew's newer build (the old repo's choice, kept).
 - `~/.local.zshrc`: created empty, never tracked, never overwritten; sourced last, so it wins.
 - `~/.config/zsh/conf.d/`: created; other bundles link `<name>.zsh` here. Dangling links in it
   (a bundle file renamed or deleted) are removed by a `clean` step, and zshrc skips them anyway.
-- `~/.cache/zsh/`: made by zshrc for the completion dump (`zcompdump-<version>`) and cache.
+- `~/.cache/zsh/`: made by zshrc for the completion dump (`zcompdump-<version>`), its stamp
+  (`.fpath`), the completion cache, and `init/`: the cached output of `<tool> completion zsh` and
+  init commands (`zshrc_cached`, below). Deleting the directory is always safe.
+- `~/.zshenv` (Linux) also sets `skip_global_compinit=1`: Debian's `/etc/zsh/zshrc` would run a
+  full `compinit` into `~/.zcompdump` before zshrc runs its own.
 - starship reads `~/.config/starship.toml`; none is shipped (the defaults), so a machine may add
   one without touching the repo.
 
@@ -60,7 +64,9 @@ zshrc does nine things, in this order:
    Ctrl-Left/Right by word, Ctrl-R, `magic-space`, Ctrl-X Ctrl-E edits the line in `$EDITOR`.
 4. **Completion**: `compinit` (dump in `~/.cache/zsh`), a menu you move through, case-insensitive
    and partial-word matching. Homebrew's `share/zsh/site-functions` goes on `fpath` first.
-   `docker completion zsh` and `kubectl completion zsh` when those commands exist.
+   The full scan and audit of `fpath` runs only when the last one is a day old, `fpath` differs
+   or a directory in it changed; otherwise `compinit -C` loads the dump. `docker completion zsh`
+   and `kubectl completion zsh` when those commands exist.
 5. **Aliases and functions**: coloured `ls` / `grep`, `l` / `ll` / `la`, `...`, `d`, `md`; the
    everyday aliases of oh-my-zsh's git plugin (`g ga gaa gapa gb gba gc gcmsg gco gcb gsw gswc
    gd gds gf gl gp glog gloga grb grbi gst gss gsta gstp`), its tmux ones (`ta tl ts tkss`),
@@ -75,6 +81,16 @@ zshrc does nine things, in this order:
 9. `~/.local.zshrc`.
 
 After editing a file by hand, run `reload`.
+
+**`zshrc_cached [--dep FILE]... [--as NAME] <command> [args]`** (defined in zshrc, for conf.d
+files): runs a command that prints shell code (a completion, an init script) once, keeps the
+output in `~/.cache/zsh/init/`, and leaves its path in `$REPLY`; it runs the command again only
+when the executable (or a `--dep` file) changed in path, size, mtime or ctime. Generating them on
+every start took over a second (gh, glab, docker, uv, tn). Use it as
+`zshrc_cached gh completion -s zsh && source "$REPLY"`, or `--as _uv` to write an autoloadable
+completion function (uv's is half a megabyte: `fpath+=("${REPLY:h}"); compdef _uv uv` parses it
+on the first completion only). Never for output that differs per shell (`fnm env` names a
+per-shell directory).
 
 So a bundle never edits zshrc: PATH -> `path:`, environment -> `env:`, anything else (`eval
 "$(tool init)"`, completions, aliases, functions) -> `bundles/<name>/<name>.zsh` linked to

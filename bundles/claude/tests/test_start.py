@@ -136,6 +136,17 @@ class Start(ClaudeCase):
         argv = self.new_session_argv()
         self.assertIn("My Big: Thing.", argv)
 
+    def test_name_ending_in_a_semicolon_stays_one_argument(self):
+        # tmux ends a command at any argument ending in ";": unescaped, "Fix it;" would cut the
+        # claude command and the set-option chain short.
+        r = self.start("--name", "Fix it;", "--json", cwd=self.repo)
+        state = self.tmux_state()[r.json["tmux"]]
+        self.assertEqual(state["options"]["@claude_name"], "Fix it;")
+        self.assertEqual(state["options"]["@tn_kind"], "claude")
+        argv = state["argv"]                        # as tmux parsed it
+        i = argv.index("--remote-control")
+        self.assertEqual(argv[i:], ["--remote-control", "Fix it;", "-n", "Fix it;"])
+
     def test_empty_name_is_usage(self):
         r = self.start("--name", "  ", code=2, cwd=self.repo)
         self.assertEqual(self.calls("tmux"), [])
@@ -248,6 +259,19 @@ class Start(ClaudeCase):
         r = self.start("--json", cwd=self.repo)
         self.assertEqual((r.json["trusted"], r.json["trust_changed"]), (True, False))
         self.assertNotIn("trusted ", r.stderr)
+
+    def test_trust_writes_through_a_symlinked_claude_json(self):
+        if os.name == "nt":
+            self.skipTest("symlinks need a privilege on Windows")
+        real = self.home / "dotfiles" / "claude.json"
+        real.parent.mkdir()
+        real.write_text(json.dumps({"hasCompletedOnboarding": True}))
+        self.claude_json().unlink()
+        self.claude_json().symlink_to(real)
+        self.start(cwd=self.repo)
+        self.assertTrue(self.claude_json().is_symlink())
+        data = json.loads(real.read_text())
+        self.assertTrue(data["projects"][claude.project_key(self.repo)]["hasTrustDialogAccepted"])
 
     def test_trust_key_on_windows_uses_forward_slashes(self):
         # Claude Code on Windows reads projects["C:/Users/alex/repo"]; a backslash key is ignored.

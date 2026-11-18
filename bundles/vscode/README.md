@@ -107,7 +107,8 @@ It replaces the old `port-forward`, `port-list` and `port-stop` scripts, with no
 
 - **Private by default.** The link works from anywhere, but only after signing in to the account
   that started it. `--public` (devtunnel's `--allow-anonymous`) lets anyone with the link in; it
-  is per forward and never remembered. A private link cannot be curl'ed: API clients use
+  is per forward and never remembered. Opening a port that is already forwarded reuses that
+  forward with its access, and warns when it differs from what was asked. A private link cannot be curl'ed: API clients use
   `devtunnel token <id> --scopes connect` and the header `X-Tunnel-Authorization: tunnel <token>`.
 - **It returns to the prompt.** `devtunnel host` is a foreground process; tn starts it detached
   (its own session on Unix, `DETACHED_PROCESS` on Windows, so closing the terminal does not take

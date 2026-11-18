@@ -228,6 +228,18 @@ class Sessions(ClaudeCase):
         self.assertEqual(self.tmux_state()["claude-acme-shop-web-00"]["options"]["@claude_name"],
                          "Acme Shop Web #T1-00")
 
+    def test_restart_waits_on_the_old_pid_without_polling_claude_agents(self):
+        # The old claude's pid is read once; the wait polls that pid, not `claude agents`.
+        self.set_agents([{"sessionId": U1, "status": "idle", "pid": 4242}])
+        alive = iter([True, True, True])            # the lookup, then two polls; then gone
+        with mock.patch.object(claude, "STOP_WAIT", 1), \
+                mock.patch.object(claude, "pid_alive", lambda pid: next(alive, False)), \
+                mock.patch.object(claude.time, "sleep", lambda s: None):
+            r = self.tn("claude", "restart", "claude-acme-shop-web-00", "--json")
+        self.assertExit(r, 0)
+        # One lookup before the kill, one for the "running outside tmux" check of the resume.
+        self.assertEqual(self.calls("claude").count(["agents", "--json"]), 2)
+
     def test_restart_keeps_a_custom_name(self):
         self.set_agents([])
         self.seed_session("claude-acme-iphone-build", title="Acme iPhone Build",

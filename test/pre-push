@@ -1,6 +1,8 @@
 #!/bin/sh
 # Git pre-push hook: nothing personal and no secret leaves this machine.
-# Runs test/privacy-check.sh, and gitleaks over the working tree when it is installed.
+# Runs test/privacy-check.sh (with --history for the commits being pushed that the remote does
+# not have yet: their author, committer and message are published too, and so is the identity
+# the next commit here would carry), and gitleaks over the repository when it is installed.
 #
 # Install (once per clone):
 #   ln -sf ../../test/pre-push .git/hooks/pre-push
@@ -11,8 +13,22 @@ set -eu
 repo=$(git rev-parse --show-toplevel)
 cd "$repo"
 
+# stdin: one `<local ref> <local sha> <remote ref> <remote sha>` line per ref pushed; a deletion
+# has an all-zero local sha and publishes nothing.
+remote=${1:-}
+set --
+while read -r _lref lsha _rref _rsha; do
+  case "$lsha" in *[!0]*) set -- "$@" --history "$lsha" ;; esac
+done
+# What the remote already has (as far as this clone knows) is published already: not rechecked.
+if [ $# -gt 0 ] && [ -n "$remote" ]; then
+  for sha in $(git for-each-ref --format='%(objectname)' "refs/remotes/$remote/"); do
+    set -- "$@" --history "^$sha"
+  done
+fi
+
 echo "pre-push: test/privacy-check.sh"
-test/privacy-check.sh || { echo "pre-push: privacy check failed; push aborted" >&2; exit 1; }
+test/privacy-check.sh "$@" || { echo "pre-push: privacy check failed; push aborted" >&2; exit 1; }
 
 if command -v gitleaks >/dev/null 2>&1; then
   echo "pre-push: gitleaks"

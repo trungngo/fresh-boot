@@ -1,0 +1,40 @@
+#!/bin/sh
+# Fake macOS `defaults`: read, read-type and write (with -currentHost), on a store under
+# $FAKE_STATE/defaults, one file per domain with `key<TAB>type<TAB>value` lines. Without it a mac
+# sandbox apply fails on a Linux host (no `defaults`), and on a Mac it would change the REAL
+# preferences: `defaults` writes through cfprefsd for the logged-in user, whatever $HOME says.
+echo "defaults $*" >> "$FAKE_LOG"
+[ -n "${FAKE_STATE:-}" ] || { echo "fake defaults: FAKE_STATE is not set (not in a sandbox)" >&2; exit 3; }
+host=
+[ "${1:-}" = -currentHost ] && { host=.currentHost; shift; }
+verb=${1:-}; domain=${2:-}; key=${3:-}
+[ -n "$domain" ] && [ -n "$key" ] || { echo "fake defaults: usage: defaults [-currentHost] read|read-type|write <domain> <key> ..." >&2; exit 2; }
+dir="$FAKE_STATE/defaults"
+store="$dir/$(printf '%s' "$domain" | tr '/' '_')$host"
+entry=$(awk -F '\t' -v k="$key" '$1 == k { print; exit }' "$store" 2>/dev/null)
+case "$verb" in
+  read)
+    [ -n "$entry" ] || { echo "The domain/default pair of ($domain, $key) does not exist" >&2; exit 1; }
+    printf '%s\n' "$entry" | cut -f3 ;;
+  read-type)
+    [ -n "$entry" ] || { echo "The domain/default pair of ($domain, $key) does not exist" >&2; exit 1; }
+    echo "Type is $(printf '%s\n' "$entry" | cut -f2)" ;;
+  write)
+    shift 3
+    type=string
+    case "${1:-}" in
+      -bool|-boolean) type=boolean; shift ;;
+      -int|-integer) type=integer; shift ;;
+      -float) type=float; shift ;;
+      -string) shift ;;
+    esac
+    [ $# -eq 1 ] || { echo "fake defaults: write takes one value" >&2; exit 2; }
+    value=$1
+    if [ "$type" = boolean ]; then
+      case "$value" in true|TRUE|yes|YES|1) value=1 ;; *) value=0 ;; esac
+    fi
+    mkdir -p "$dir"
+    { awk -F '\t' -v k="$key" '$1 != k' "$store" 2>/dev/null; printf '%s\t%s\t%s\n' "$key" "$type" "$value"; } > "$store.tmp"
+    mv "$store.tmp" "$store" ;;
+  *) echo "fake defaults: unsupported: $verb" >&2; exit 2 ;;
+esac

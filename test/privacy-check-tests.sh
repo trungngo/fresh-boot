@@ -84,6 +84,11 @@ new_repo
 printf '\0\0\1\2plain binary\0' > "$r/b.bin"
 expect "binary without personal data is clean" 0 "clean" -- "$r"
 
+# A symlink's target is what git publishes for it.
+new_repo
+ln -s "$U/janedoe/notes" "$r/notes"
+expect "symlink target with a home path" 1 "\[path, link target\]" -- "$r"
+
 # Commit metadata and messages with --history.
 new_repo
 echo ok > "$r/a.txt"; git -C "$r" add a.txt
@@ -101,6 +106,11 @@ git -C "$r" config user.email "123+dev${AT}users.noreply.github.com"
 commit first
 expect "--history: noreply identity is clean" 0 "clean" -- --history HEAD -- "$r"
 expect "--history: unknown ref is a usage error" 2 "no such commit" -- --history nope -- "$r"
+new_repo; commit "port the acmecorp scripts"
+base=$(git -C "$r" rev-parse HEAD); git -C "$r" commit -q --allow-empty -m "a clean follow-up"
+expect "--history: the follow-up keeps the old message reachable" 1 "\[denylist, message\] acmecorp" -- --history HEAD -- "$r"
+expect "--history ^REF: published commits are not rechecked" 0 "clean" -- --history HEAD --history "^$base" -- "$r"
+expect "--history ^REF: unknown ref is a usage error" 2 "no such commit" -- --history HEAD --history ^nope -- "$r"
 
 echo
 echo "privacy-check-tests: $pass passed, $fail failed"

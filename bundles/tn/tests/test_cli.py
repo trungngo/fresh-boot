@@ -385,6 +385,15 @@ class Discovery(TnTestCase):
         self.assertIn("broken", r.stderr)
         self.assertIn("not a literal", r.stderr)
 
+    def test_plugin_name_must_be_importable(self):
+        self.write_plugin("demo", D.DEMO)
+        (self.plugin_dir() / "my-thing.py").write_text(
+            'from tn import Plugin\nplugin = Plugin("my-thing")\n')
+        r = self.tn("plugins", "--json")
+        rows = {x["name"]: x["state"] for x in r.json}
+        self.assertEqual(rows["demo"], "ok")
+        self.assertIn("is not a plugin name", rows["my-thing"])
+
     def test_requires(self):
         self.write_plugin("child", D.NEEDS_BASE)
         r = self.tn("child", "hi")
@@ -499,6 +508,16 @@ class Version(TnTestCase):
         p = self._run_as_old_python(env, "--version")
         self.assertEqual(p.returncode, 0, p.stderr)
         self.assertIn("tn ", p.stdout)
+
+    def test_reexec_marker_is_not_inherited(self):
+        # Set by the hand-over for the new interpreter only: programs tn starts never see it.
+        self.write_plugin("envshow", "\n".join([
+            "import os", "from tn import Plugin, out", 'plugin = Plugin("envshow")',
+            "@plugin.command()", "def get(ctx, a):",
+            '    out.line(os.environ.get("TN_REEXEC", "-"))', ""]))
+        r = self.tn_proc("envshow", "get", env={"TN_REEXEC": "1"})
+        self.assertExit(r, 0)
+        self.assertEqual(r.stdout, "-\n")
 
     def test_python_dash_m(self):
         import subprocess

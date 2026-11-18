@@ -77,6 +77,9 @@ steps:
         if [[ $LC_CTYPE == UTF-8 ]]; then
             export LC_CTYPE=C.UTF-8
         fi
+        # Debian's /etc/zsh/zshrc runs a full compinit (into ~/.zcompdump) before ~/.zshrc runs
+        # its own: twice the work of a shell start's slowest step.
+        skip_global_compinit=1
 
   # Machine-local overrides, sourced last by zshrc; never tracked, never overwritten.
   - label: Machine-local ~/.local.zshrc

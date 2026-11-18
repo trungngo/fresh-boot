@@ -25,9 +25,15 @@ sessions = json.loads(db.read_text()) if db.exists() else {}
 def target(rest):
     return rest[rest.index("-t") + 1].lstrip("=")
 
+# As real tmux: ANY argument ending in ";" ends the command (the ";" is dropped), and a
+# trailing "\;" stands for a literal ";".
 cmds, cur = [], []
 for a in argv:
-    if a == ";":
+    if a.endswith("\\;"):
+        cur.append(a[:-2] + ";")
+    elif a.endswith(";"):
+        if a[:-1]:
+            cur.append(a[:-1])
         cmds.append(cur)
         cur = []
     else:

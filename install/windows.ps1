@@ -8,14 +8,6 @@ function Refresh-Path {
                 [Environment]::GetEnvironmentVariable('Path', 'User')
 }
 
-# Runs a native command and returns its output as text; $LASTEXITCODE holds its exit code.
-# 'Stop' would turn its stderr into a terminating error in Windows PowerShell 5.1.
-function Invoke-Quiet([scriptblock]$Command) {
-    $eap = $ErrorActionPreference
-    $ErrorActionPreference = 'Continue'
-    try { (& $Command 2>&1 | Out-String) } finally { $ErrorActionPreference = $eap }
-}
-
 # 1. Git, from the winget source only: searching msstore too fails where TLS
 # is inspected ("The server certificate did not match any of the expected values").
 if (-not (Get-Command git -ErrorAction SilentlyContinue)) { winget install --id Git.Git -e --source winget --accept-source-agreements --accept-package-agreements }
@@ -24,6 +16,11 @@ if (-not (Get-Command git -ErrorAction SilentlyContinue)) { winget install --id 
 if (-not (Test-Path (Join-Path $env:windir 'System32\vcruntime140.dll'))) {
     $vcArch = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'arm64' } else { 'x64' }
     winget install --id "Microsoft.VCRedist.2015+.$vcArch" -e --source winget --accept-source-agreements --accept-package-agreements
+    # 'Stop' does not cover a native command's exit code: without this check a failed install
+    # surfaces only as dot printing nothing.
+    if (-not (Test-Path (Join-Path $env:windir 'System32\vcruntime140.dll'))) {
+        throw "fresh-boot: the Visual C++ runtime did not install (winget exit code $LASTEXITCODE); dot cannot run without it"
+    }
 }
 Refresh-Path
 

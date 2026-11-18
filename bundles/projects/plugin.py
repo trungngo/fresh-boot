@@ -55,6 +55,7 @@ from tn import (Cancelled, Context, Fail, Person, Plugin, Problem, UsageError, a
                 ask, can_prompt, capture, clock, confirm, fs, git, need, out, pick, run,
                 split_url)
 from tn.match import subsequence
+from tn.tomlw import value_text
 
 plugin = Plugin("projects", help="projects, repos, workspaces, and cd",
                 groups=["proj", "repo", "ws", "cd"])
@@ -385,6 +386,8 @@ def add_remote(ctx: Context, forge_key: str, *, repo_dir, name: str | None = Non
                                group=group or None)
     url = forge.url(path)
     rname = name or forge.remote or forge.key
+    if rname.startswith("-"):
+        raise UsageError("invalid remote name %r: it starts with '-'" % rname)
     existing = dict(read_remotes(repo_dir)).get(rname)
     if existing is not None:
         if existing == url:
@@ -392,7 +395,7 @@ def add_remote(ctx: Context, forge_key: str, *, repo_dir, name: str | None = Non
             return {"name": rname, "url": url, "forge": forge.key, "path": path,
                     "fetched": False}
         raise Fail("remote %s already exists with another url: %s" % (rname, existing))
-    run(["git", "-C", str(repo_dir), "remote", "add", rname, url], quiet=True)
+    run(["git", "-C", str(repo_dir), "remote", "add", "--", rname, url], quiet=True)
     fetched = False
     if fetch:
         rc = run(["git", "-C", str(repo_dir), "fetch", rname], check=False, quiet=True)
@@ -572,10 +575,16 @@ def ws_blockers(repo_dir, original=None) -> list:
     A commit is safe when a remote-tracking ref reaches it, or when a ref (or HEAD) of the
     original repo reaches it: ``original`` defaults to ``<project>/src/<repo>`` for a repo in a
     ``src-NN`` workspace, so a copy of a repo without remotes can be removed."""
+    return _ws_check(repo_dir, original)[1]
+
+
+def _ws_check(repo_dir, original=None) -> tuple:
+    """(dirty, blockers): ``ws_blockers`` plus whether ``git status`` showed changes (or
+    failed), so ``ws ls`` needs no second ``git status``."""
     blockers = []
     st = git(repo_dir, "status", "--porcelain")
     if st.returncode != 0:
-        return ["git status failed"]
+        return True, ["git status failed"]
     n = len([x for x in st.stdout.splitlines() if x.strip()])
     if n:
         blockers.append("%d uncommitted or untracked change%s" % (n, "" if n == 1 else "s"))
@@ -593,24 +602,23 @@ def ws_blockers(repo_dir, original=None) -> list:
     has_commits = has_head or bool(
         git(repo_dir, "for-each-ref", "--count=1", "refs/heads", "refs/tags").stdout.strip())
     if not has_commits:
-        return blockers
+        return bool(n), blockers
     if original is None:
         original = _original_of(repo_dir)
-    remotes = git(repo_dir, "remote").stdout.split()
-    if not remotes and original is None:
-        return blockers + ["no remote"]
+    if not read_remotes(repo_dir) and original is None:
+        return bool(n), blockers + ["no remote"]
     # Everything local: HEAD (a detached HEAD too), every branch and tag.
     rl = git(repo_dir, "rev-list", *(["HEAD"] if has_head else []), "--branches", "--tags",
              "--not", "--remotes")
     if rl.returncode != 0:
         blockers.append("cannot compare local commits with the remotes")
-        return blockers
+        return bool(n), blockers
     local = rl.stdout.split()
     if local and original is not None:
         known = git(original, "rev-list", "--all")
         if known.returncode != 0:
             blockers.append("cannot compare local commits with %s" % _short(original))
-            return blockers
+            return bool(n), blockers
         seen = set(known.stdout.split())
         local = [c for c in local if c not in seen]
     c = len(local)
@@ -618,7 +626,7 @@ def ws_blockers(repo_dir, original=None) -> list:
         where = "on no remote" if original is None else \
             "on no remote and not in %s/%s" % (Path(original).parent.name, Path(original).name)
         blockers.append("%d commit%s %s" % (c, "" if c == 1 else "s", where))
-    return blockers
+    return bool(n), blockers
 
 
 def _sessions(ctx: Context) -> list:
@@ -715,7 +723,7 @@ def _ws_copy(source: Path, dest: Path, dry_run: bool) -> WsRepo:
             # trace of the local path is left.
             _g(dest, "remote", "remove", "origin")
             for rname, url in remotes:
-                _g(dest, "remote", "add", rname, url)
+                _g(dest, "remote", "add", "--", rname, url)
             f = git(dest, "fetch", "--quiet", "--prune", primary)
             if f.returncode != 0:
                 out.debug("  %s: fetch from %s failed: %s" % (name, primary, f.stderr.strip()))
@@ -1012,10 +1020,6 @@ def _repo_ctx(ctx: Context, target: str | None) -> Context:
 # == proj ===================================================================================
 
 
-def _toml_str(s: str) -> str:
-    return '"%s"' % s.replace("\\", "\\\\").replace('"', '\\"')
-
-
 def _proj_row(cfg, p: ProjectRef) -> dict:
     forge = identity = None
     try:
@@ -1063,7 +1067,7 @@ def new(ctx, args):
         fs.mkdir(pdir / str(d))
     conf = {"forge": args.forge, "group": args.group, "identity": args.identity}
     if any(conf.values()):
-        text = "".join("%s = %s\n" % (k, _toml_str(v)) for k, v in conf.items() if v)
+        text = "".join("%s = %s\n" % (k, value_text(v)) for k, v in conf.items() if v)
         fs.write_text(pdir / "tn.toml", text)
     out.info("Created %s" % _short(pdir))
     out.hint("add a repo: tn repo new <name> -p %s   or clone one: tn repo clone gh:owner/repo "
@@ -1106,6 +1110,8 @@ def proj_show(ctx, args):
 def _parse_source(cfg, source: str, project_forge: str | None):
     """(forge | None, path | None, url | None) for a clone source (§7.1.2)."""
     s = source.strip()
+    if s.startswith("-"):
+        raise UsageError("cannot clone %r: it starts with '-'" % source)
     if "://" in s or re.match(r"^[^@/:\s]+@[^:/\s]+:", s):
         f = cfg.forge_for_url(s)
         _, path = split_url(s)
@@ -1113,6 +1119,8 @@ def _parse_source(cfg, source: str, project_forge: str | None):
     m = re.match(r"^([A-Za-z0-9_.-]+):(.+)$", s)
     if m:
         key, path = m.group(1), m.group(2).strip("/")
+        if path.startswith("-"):
+            raise UsageError("cannot clone %r: the path starts with '-'" % source)
         if path.endswith(".git"):
             path = path[:-4]
         if key in (cfg.get("forges") or {}):
@@ -1148,7 +1156,7 @@ def _clone(forge, path: str | None, url: str | None, target: Path) -> str:
     if url is None:
         url = forge.url(path)
     need("git", "dot apply git")
-    run(["git", "clone", url, str(target)], quiet=True)
+    run(["git", "clone", "--", url, str(target)], quiet=True)
     return url
 
 
@@ -1252,6 +1260,8 @@ def repo_ls(ctx, args):
     if args.ws and args.all_ws:
         raise UsageError("--ws and --all-ws exclude each other")
     ws = "all" if args.all_ws else (args.ws or None)
+    if ws not in (None, "all"):
+        _check_name(ws_dir_name(ws), "workspace", REPO_RE)
     refs: list = []
     if args.all and not args.project:
         for p in iter_projects(cfg):
@@ -1369,11 +1379,9 @@ def ws_ls(ctx, args):
         repos = list(iter_repos(pdir, w))
         dirty = unpushed = 0
         for r in repos:
-            st = git(r.path, "status", "--porcelain")
-            if st.returncode != 0 or st.stdout.strip():
-                dirty += 1
-            if ws_blockers(r.path):
-                unpushed += 1
+            is_dirty, blockers = _ws_check(r.path)
+            dirty += is_dirty
+            unpushed += bool(blockers)
         try:
             mtime = wdir.stat().st_mtime
         except OSError:
@@ -1426,14 +1434,16 @@ def ws_rm(ctx, args):
         if s.dir and _under(s.dir, wdir):
             raise Fail("a %s session runs in %s: stop it first: tn %s stop %s"
                        % (s.kind, _short(wdir), s.kind, s.id))
-    if not confirm("delete %s (%d repo%s)?" % (_short(wdir), len(repos),
-                                               "" if len(repos) == 1 else "s")):
+    dry = ctx.options.dry_run
+    if not dry and not confirm("delete %s (%d repo%s)?" % (
+            _short(wdir), len(repos), "" if len(repos) == 1 else "s")):
         raise Cancelled()
     fs.rmtree(wdir)
-    out.info("Removed %s" % _short(wdir))
+    if not dry:
+        out.info("Removed %s" % _short(wdir))
     out.result({"project": ctx.project, "workspace": name, "path": str(wdir),
-                "removed": not ctx.options.dry_run, "repos": repos})
-    if _under(ctx.cwd, wdir):
+                "removed": not dry, "repos": repos})
+    if not dry and _under(ctx.cwd, wdir):
         ctx.request_cd(pdir)
 
 

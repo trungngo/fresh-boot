@@ -1145,7 +1145,8 @@ The same logic is the Python API `projects.ws_new(ctx, id=None) -> WsResult`, wh
 3. If any session has its `dir` inside the workspace, exit 1:
    `stop it first: tn claude stop <id>`.
 4. Confirm `delete ~/…/src-02 (3 repos)?` (§2.5), then remove the directory tree.
-5. If the cwd was inside it, `request_cd(project_dir)`.
+   `--dry-run` runs steps 1-3, skips the confirmation and removes nothing.
+5. If the cwd was inside it, `request_cd(project_dir)` (not under `--dry-run`).
 
 JSON: `{"project", "workspace", "path", "removed": true, "repos": [...]}`. With a refusal and
 `--json`, the error includes `"hint"` with the blocking items.
@@ -1896,7 +1897,7 @@ class ClaudeStart(TnTestCase):
 
 | helper | does |
 |---|---|
-| `TnTestCase.setUp` | creates a temp dir holding `home/`, `bin/` and `state/`. Sets `HOME`, `USERPROFILE`, `XDG_CONFIG_HOME`, `XDG_STATE_HOME`, `XDG_CACHE_HOME`, `TN_HOME`, `TN_CONFIG_DIR`, `TN_STATE_DIR` under it; `MYPROJECTS_DIR=<home>/myprojects`, `MY_MACHINE=T1`, `MY_NAME`, `MY_EMAIL`, `NO_COLOR=1`. Sets `PATH=<tmp>/bin` plus the directories of `git` and the running Python only. Unsets `TN_CD_FILE`, `TMUX`, `SSH_CONNECTION`, `DISPLAY`, `GH_TOKEN`, `GITHUB_TOKEN`. Keeps `TN_PLUGIN_PATH` from the runner. Everything is restored in `tearDown`. |
+| `TnTestCase.setUp` | creates a temp dir holding `home/`, `bin/` and `state/`. Sets `HOME`, `USERPROFILE`, `XDG_CONFIG_HOME`, `XDG_STATE_HOME`, `XDG_CACHE_HOME`, `TN_HOME`, `TN_CONFIG_DIR`, `TN_STATE_DIR` under it; `MYPROJECTS_DIR=<home>/myprojects`, `MY_MACHINE=T1`, `MY_NAME`, `MY_EMAIL`, `NO_COLOR=1`. Sets `PATH=<tmp>/bin` plus the directories of `git` and the running Python only. Every other variable of the runner is dropped (`TN_CD_FILE`, `TMUX`, `SSH_*`, `DISPLAY`, tokens, `CLAUDE*`, ...) except the locale, temp-dir and Python ones a process needs. Keeps `TN_PLUGIN_PATH` from the runner. Everything is restored in `tearDown`. |
 | `self.home`, `self.tmp` | `Path`s |
 | `self.fake(name, *, stdout="", stderr="", exit=0, script=None)` | writes an executable `bin/<name>`: a Python script with shebang `sys.executable` (plus a `.cmd` shim on Windows). It appends `{"argv": [...], "cwd": ..., "stdin": ...}` as a JSON line to `<tmp>/calls/<name>.jsonl`, then either prints the canned output and exits, or runs `script`: Python source with `argv`, `stdin`, `state_dir` and `log` in scope, for stateful fakes like tmux. |
 | `self.calls(name) -> list[list[str]]` | argv lists (without the program) in call order; `self.call_records(name)` gives the full dicts |

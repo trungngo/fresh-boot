@@ -347,6 +347,14 @@ class Kill(TmuxCase):
         self.assertEqual(r.json, [{"name": "work", "killed": True}])
         self.assertEqual(self.names(), [])
 
+    def test_name_ending_in_a_semicolon_kills_only_that_session(self):
+        # tmux reads "-t =foo;" as "-t =foo" plus a command separator: unescaped, killing
+        # "foo;" would kill "foo".
+        self.seed({"name": "foo"}, {"name": "foo;"})
+        r = self.tn("tmux", "kill", "foo;", "--json")
+        self.assertExit(r, 0)
+        self.assertEqual(self.names(), ["foo"])
+
     def test_no_sessions(self):
         r = self.tn("tmux", "kill", "work")
         self.assertExit(r, 1)
@@ -356,6 +364,7 @@ class Kill(TmuxCase):
         r = self.tn("-n", "tmux", "kill", "--all", "-y")
         self.assertExit(r, 0)
         self.assertIn("would: run tmux kill-session -t =work", r.stderr)
+        self.assertNotIn("killed", r.stderr)
         self.assertEqual(self.mutating(), [])
         self.assertEqual(len(self.names()), 2)
 

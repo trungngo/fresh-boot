@@ -3,13 +3,15 @@
 #
 #   test/privacy-check.sh [--history REF]... [REPO]        default REPO: this repository
 #
-# Every tracked and untracked (not ignored) file under REPO, .git excluded, and every file
-# path, is checked for the rules below. A binary file (one with a NUL byte: .pyc, images, ...)
-# is not skipped: every run of 4+ printable characters in it is checked like a line.
+# Every tracked and untracked (not ignored) file under REPO, .git excluded, every file path and
+# every symlink's target (what git stores for a link) is checked for the rules below. A binary
+# file (one with a NUL byte: .pyc, images, ...) is not skipped: every run of 4+ printable
+# characters in it is checked like a line.
 #
 # --history REF (repeatable) also checks what a push of REF publishes: the author and committer
 # name and e-mail and the message of every commit reachable from REF, and the user.name /
 # user.email git would put on the next commit. Run it on the branch you are about to publish.
+# A REF written ^REF excludes the commits reachable from it (those already published).
 #
 #   email     an e-mail address outside example.com / example.org / example.net, *.example,
 #             *.invalid, *.test and noreply addresses
@@ -71,7 +73,7 @@ if [ -f "$denylist" ] \
 fi
 
 for r in ${refs[@]+"${refs[@]}"}; do
-  git -C "$repo" rev-parse --verify --quiet "$r^{commit}" >/dev/null \
+  git -C "$repo" rev-parse --verify --quiet "${r#^}^{commit}" >/dev/null \
     || { echo "privacy-check: --history: no such commit: $r" >&2; exit 2; }
 done
 
@@ -204,11 +206,16 @@ files = subprocess.run(["git", "-C", repo, "ls-files", "-z", "-co", "--exclude-s
 total = 0
 for rel in sorted(set(f for f in files if f)):
     path = os.path.join(repo, rel)
-    if not os.path.isfile(path) or os.path.islink(path):
+    if not os.path.islink(path) and not os.path.isfile(path):
         continue
     for kind, what in scan(rel):
         print("%s: [%s, file name] %s" % (rel, kind, what))
         total += 1
+    if os.path.islink(path):                    # git publishes the target text, not the file
+        for kind, what in scan(os.readlink(path)):
+            print("%s: [%s, link target] %s" % (rel, kind, what))
+            total += 1
+        continue
     try:
         with open(path, "rb") as f:
             data = f.read()

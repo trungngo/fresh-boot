@@ -442,6 +442,10 @@ def _open_one(ctx, port: int, access: str, seconds: int | None) -> dict:
         if access == "public" and st.get("access") != "public":
             out.warn("port %d stays private: tn tunnel close %d, then open it with --public"
                      % (port, port))
+        elif access != "public" and st.get("access") == "public":
+            # Asked for the private default, handed back a link anyone can open: say so.
+            out.warn("port %d stays PUBLIC: anyone with the link gets in; tn tunnel close %d, "
+                     "then open it again to make it private" % (port, port))
         if seconds is not None:
             _set_expiry(st, seconds)
             out.info("closes in %s" % clock.fmt_duration(seconds))

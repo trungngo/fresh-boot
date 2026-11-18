@@ -157,13 +157,16 @@ class _Cache:
     def save(self) -> None:
         if not self.dirty:
             return
+        tmp = self.file.with_name(self.file.name + ".%d.tmp" % os.getpid())
         try:
             self.file.parent.mkdir(parents=True, exist_ok=True)
-            tmp = self.file.with_name(self.file.name + ".%d.tmp" % os.getpid())
             tmp.write_text(json.dumps({"version": 1, "entries": self.data}), encoding="utf-8")
             os.replace(tmp, self.file)
         except OSError:
-            pass
+            try:        # a full disk must not leave a .tmp per run behind
+                tmp.unlink()
+            except OSError:
+                pass
 
 
 @dataclass
@@ -226,6 +229,8 @@ def discover() -> Registry:
             info.path = str(path)
             if both:
                 info.broken = "both %s.py and a %s/ package in %s" % (name, name, d)
+            elif not name.isidentifier():   # it is imported as tn.plugins.<name>
+                info.broken = "%r is not a plugin name (letters, digits and _ only)" % name
             reg.plugins[name] = info
     cache.save()
     claims: dict = {}
@@ -256,11 +261,16 @@ def bundle_of(plugin_name: str) -> str:
     return plugin_name.replace("_", "-")
 
 
+_namespace_set = False
+
+
 def setup_namespace(reg: Registry) -> None:
     """Point ``tn.plugins.__path__`` at the plugin directories, dropping modules imported
     from elsewhere (another TN_PLUGIN_PATH in the same process: tests)."""
+    global _namespace_set
     import tn.plugins as ns
     paths = [str(d) for d in reg.dirs]
+    imported = any(m.startswith("tn.plugins.") for m in sys.modules)
     ns.__path__[:] = paths
     for modname in [m for m in list(sys.modules) if m.startswith("tn.plugins.")]:
         mod = sys.modules.get(modname)
@@ -287,7 +297,12 @@ def setup_namespace(reg: Registry) -> None:
                     delattr(ns, top)
                 except AttributeError:
                     pass
-    importlib.invalidate_caches()
+    # Only a process that imported plugins or set the namespace before (tests, which rewrite
+    # plugin directories) can hold stale finder caches; on 3.13 the call also imports
+    # importlib.metadata, a quarter of a plain tn run's import time.
+    if _namespace_set or imported:
+        importlib.invalidate_caches()
+    _namespace_set = True
 
 
 class PluginLoadError(Fail):

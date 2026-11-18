@@ -157,6 +157,13 @@ class Open(TunnelCase):
         r = self.open_ok("3000", "--public")
         self.assertIn("stays private", r.stderr)
 
+    def test_reuse_of_a_public_tunnel_without_public_warns(self):
+        # The private default was asked for; the link handed back is open to anyone.
+        self.open_ok("3000", "--public")
+        r = self.open_ok("3000", "--json")
+        self.assertEqual((r.json[0]["reused"], r.json[0]["access"]), (True, "public"))
+        self.assertIn("stays PUBLIC", r.stderr)
+
     def test_label_and_context_from_the_project(self):
         self.require_git()
         p = self.make_project("acme", repos=["acme-shop-app"], workspaces=["src-02"])

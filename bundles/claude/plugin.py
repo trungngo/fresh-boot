@@ -96,6 +96,13 @@ def _need_claude() -> str:
     return need("claude", fix="dot apply claude")
 
 
+def _tmux_arg(value: str) -> str:
+    """``value`` as one literal argument in a tmux command line. tmux ends a command at ANY
+    argument ending in ";" (not only a lone ";"), dropping the ";": a title "Fix it;" would cut
+    the chain short. A trailing "\\;" stands for a literal ";"."""
+    return value[:-1] + "\\;" if value.endswith(";") else value
+
+
 def _tmux_has(tmux: str, name: str) -> bool:
     return capture([tmux, "has-session", "-t", "=" + name], timeout=10).returncode == 0
 
@@ -385,7 +392,8 @@ def trust(directory) -> bool:
     if entry.get("hasTrustDialogAccepted") is True:
         return False
     entry["hasTrustDialogAccepted"] = True
-    fs.write_text(path, json.dumps(data, indent=2) + "\n")
+    # Through a symlink to its target: the atomic rename would replace the link itself.
+    fs.write_text(path.resolve(), json.dumps(data, indent=2) + "\n")
     return True
 
 
@@ -465,10 +473,11 @@ def _start(ctx, args, force=None):
     out.result(_launch(ctx, args, force), text=lambda r: r["tmux"])
 
 
-def _launch(ctx, args, force=None) -> dict:
+def _launch(ctx, args, force=None, account=None) -> dict:
     """``start`` without printing its result; ``force=(title, tmux name)`` is ``restart`` or
     ``resume`` bringing a session back under its old names (in a dry run the old tmux session
-    may still be there)."""
+    may still be there). ``account`` is the signed-in e-mail when the caller already asked
+    (``resume`` would otherwise run ``claude auth status`` once per session)."""
     dry_restart = force is not None and ctx.options.dry_run
     tmux = _need_tmux()
     claude_bin = _need_claude()
@@ -550,12 +559,13 @@ def _launch(ctx, args, force=None) -> dict:
     # where getcwd() fails, and Claude exits ("The current directory no longer exists"). An
     # explicit cd inside the session fixes that; argv stays a list, so nothing is re-quoted.
     argv += ["sh", "-c", 'cd "$1" && shift && exec "$@"', "tn-claude", str(directory),
-             claude_bin, *cargs,
-             ";", "set-option", "-t", target, "@claude_name", title,
-             ";", "set-option", "-t", target, "@claude_dir", str(directory),
-             ";", "set-option", "-t", target, "@claude_uuid", uuid,
-             ";", "set-option", "-t", target, "@tn_context", rctx.name or "",
-             ";", "set-option", "-t", target, "@tn_kind", "claude"]
+             claude_bin, *cargs]
+    for opt, value in (("@claude_name", title), ("@claude_dir", str(directory)),
+                       ("@claude_uuid", uuid), ("@tn_context", rctx.name or ""),
+                       ("@tn_kind", "claude")):
+        argv += [";", "set-option", "-t", target, opt, value]
+    # Only the ";" separators may end in ";": every other argument is escaped.
+    argv = [a if a == ";" else _tmux_arg(a) for a in argv]
     run(argv, quiet=True, env=_scrub_env())
 
     if not ctx.options.dry_run:
@@ -569,7 +579,7 @@ def _launch(ctx, args, force=None) -> dict:
                                                    shlex.join(cargs)))
         _record({"name": tmux_name, "title": title, "uuid": uuid, "dir": str(directory),
                  "context": rctx.name or "", "created": int(clock.now()),
-                 "account": _account()})
+                 "account": account if account is not None else _account()})
         out.info("Directory: %s" % home_short(directory))
         out.info("Name:      %s" % title)
         out.info("Tmux:      %s" % tmux_name)
@@ -716,18 +726,21 @@ def restart(ctx, args):
     out.result(_relaunch(ctx, tmux, row), text=lambda r: r["tmux"])
 
 
-def _relaunch(ctx, tmux: str, row: dict) -> dict:
+def _relaunch(ctx, tmux: str, row: dict, account=None) -> dict:
     """Kill the tmux session of ``row`` and resume its conversation under the same names."""
+    # The pid is looked up once, before the kill: polling `claude agents` (a slow node start
+    # each time) would stretch the wait far past STOP_WAIT.
+    old_pid = None if ctx.options.dry_run else live_pid(row["uuid"])
     _kill(tmux, row)
     if not ctx.options.dry_run:
         out.info("stopped %s (%s)" % (row["name"], row["tmux"]))
         # Two processes on one transcript corrupt it: wait for the old claude to be gone.
         for _ in range(int(STOP_WAIT * 5)):
-            if not live_pid(row["uuid"]):
+            if not old_pid or not pid_alive(old_pid):
                 break
             time.sleep(0.2)
     try:
-        return _launch(ctx, _resume_ns(row), force=(row["name"], row["tmux"]))
+        return _launch(ctx, _resume_ns(row), force=(row["name"], row["tmux"]), account=account)
     except Fail:
         out.info("%s is stopped; bring it back with: %s" % (row["tmux"], resume_command(row)))
         raise
@@ -777,22 +790,40 @@ def _transcript_end(directory: str, uuid: str):
     SIGHUP of ``tn claude stop`` and the SIGTERM of a shutdown alike. One after the last message
     means it exited on its own; a crash or a kill -9 leaves none."""
     path = transcript_dir(directory) / (uuid + ".jsonl")
-    clean = False
     try:
         mtime = path.stat().st_mtime
-        with path.open(encoding="utf-8", errors="replace") as f:
-            for line in f:
+        with path.open("rb") as f:
+            for line in _lines_backwards(f):
                 try:
-                    kind = json.loads(line).get("type")
+                    kind = json.loads(line.decode("utf-8", "replace")).get("type")
                 except (ValueError, AttributeError):
                     continue
                 if kind == "cost-state":
-                    clean = True
-                elif kind in ("user", "assistant"):
-                    clean = False
+                    return True, mtime
+                if kind in ("user", "assistant"):
+                    return False, mtime
     except OSError:
         return None
-    return clean, mtime
+    return False, mtime
+
+
+def _lines_backwards(f, block: int = 65536):
+    """The lines of binary file ``f``, last first. A transcript can run to hundreds of MB and
+    only its last few rows matter, so ``resume`` reads it from the end."""
+    f.seek(0, os.SEEK_END)
+    pos = f.tell()
+    tail = b""
+    while pos > 0:
+        step = min(block, pos)
+        pos -= step
+        f.seek(pos)
+        lines = (f.read(step) + tail).split(b"\n")
+        tail = lines.pop(0)              # may be cut short: completed by the next block
+        for line in reversed(lines):
+            if line.strip():
+                yield line
+    if tail.strip():
+        yield tail
 
 
 def _adopt(ctx, rows: list) -> None:
@@ -876,7 +907,8 @@ def resume(ctx, args):
     live = list_sessions(ctx, status=False)
     _adopt(ctx, live)
     st = auth_status()
-    rows = resume_rows(ctx, live, st["email"] if st["logged_in"] else None)
+    account = st["email"] if st["logged_in"] else None
+    rows = resume_rows(ctx, live, account)
 
     if args.name:
         if not rows:
@@ -913,9 +945,9 @@ def resume(ctx, args):
         base = {k: row[k] for k in ("tmux", "name", "uuid", "dir", "context", "state")}
         try:
             if row["_live"]:
-                _relaunch(ctx, tmux, row)
+                _relaunch(ctx, tmux, row, account)
             else:
-                _launch(ctx, _resume_ns(row), force=(row["name"], row["tmux"]))
+                _launch(ctx, _resume_ns(row), force=(row["name"], row["tmux"]), account=account)
         except TnError as e:
             if len(chosen) == 1:
                 raise

@@ -37,6 +37,23 @@ def fmt(f, s):
     vals.update({"@" + k: v for k, v in s.get("opts", {}).items()})
     return re.sub(r"#\{([^}]*)\}", lambda m: vals.get(m.group(1), ""), f)
 
+# As real tmux: ANY argument ending in ";" ends the command (the ";" is dropped) and a
+# trailing "\;" is a literal ";". The plugin never chains commands, so a second one is an error.
+cmds, cur = [], []
+for a in argv:
+    if a.endswith("\\;"):
+        cur.append(a[:-2] + ";")
+    elif a.endswith(";"):
+        if a[:-1]:
+            cur.append(a[:-1])
+        cmds.append(cur)
+        cur = []
+    else:
+        cur.append(a)
+cmds.append(cur)
+if any(cmds[1:]):
+    sys.stderr.write("fake tmux: unexpected chained command %r\n" % cmds[1:]); sys.exit(1)
+argv = cmds[0]
 cmd, rest = (argv[0], argv[1:]) if argv else ("", [])
 if cmd == "-V":
     print("tmux 3.4")

@@ -34,10 +34,14 @@ def mkdir(path, mode: int | None = None) -> bool:
 
 
 def write_text(path, text: str, mode: int | None = None) -> None:
-    """Atomic write: a temporary file in the same directory, then ``os.replace``."""
+    """Atomic write: a temporary file in the same directory, then ``os.replace``. A symlink is
+    followed (its target is replaced), so a config linked into a dotfiles checkout stays linked
+    instead of being swapped for a regular file."""
     p = Path(path)
     if _dry("write %s" % p):
         return
+    if p.is_symlink():
+        p = Path(os.path.realpath(p))
     p.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(prefix="." + p.name + ".", suffix=".tmp", dir=str(p.parent))
     try:

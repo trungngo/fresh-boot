@@ -186,6 +186,14 @@ class RepoClone(ProjectsCase):
         self.assertIn("would: run gh repo clone a/b", r.stderr)
         self.assertFalse(self.p.repo("b").exists())
 
+    def test_source_is_never_an_option(self):
+        # A URL from elsewhere (another session) must not become `git clone --upload-pack=...`.
+        for src in ("--upload-pack=touch pwned@h:x", "gh:--help"):
+            r = self.tn("repo", "clone", "--json", "--", src, "x", cwd=self.p.dir)
+            self.assertExit(r, 2)
+            self.assertIn("starts with '-'", r.error["message"])
+        self.assertFalse(self.p.repo("x").exists())
+
     def test_outside_a_project(self):
         self.assertExit(self.tn("repo", "clone", "gh:a/b"), 2)
 
@@ -258,6 +266,10 @@ class RepoLs(ProjectsCase):
     def test_fetch(self):
         r = self.ok(self.tn("repo", "ls", "--fetch", "--json", cwd=self.p.dir))
         self.assertEqual(len(r.json), 2)
+
+    def test_ws_must_be_a_name(self):
+        r = self.tn("repo", "ls", "acme", "--ws", "src-01/../..", "--json")
+        self.assertExit(r, 2)
 
     def test_needs_a_project(self):
         r = self.tn("repo", "ls", "--json")

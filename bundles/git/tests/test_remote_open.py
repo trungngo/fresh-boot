@@ -45,6 +45,11 @@ class RemoteAdd(GitCase):
         self.assertFalse(r.json["fetched"])
         self.assertIn("create it: https://github.com/alex/shop-web (gh repo create", r.stderr)
 
+    def test_remote_name_is_never_an_option(self):
+        r = self.tn("git", "remote", "add", "gh", "--name=-f", "--no-fetch", "--json", cwd=self.r)
+        self.assertExit(r, 2)
+        self.assertEqual(self.git(self.r, "remote").strip(), "")
+
     def test_unknown_forge(self):
         r = self.tn("git", "remote", "add", "nope", "--json", cwd=self.r)
         self.assertExit(r, 2)
@@ -121,7 +126,7 @@ class Open(GitCase):
     def test_opens_the_browser(self):
         self.add("origin", "https://github.com/alex/x.git")
         with mock.patch.object(gitplugin, "_browse", return_value=True) as browse:
-            r = self.ok(self.tn("git", "open", "pr", cwd=self.r))
+            r = self.ok(self.tn("git", "open", "pr", cwd=self.r, env={"DISPLAY": ":0"}))
         browse.assert_called_once_with("https://github.com/alex/x/pulls")
         self.assertEqual(r.stdout.strip(), "https://github.com/alex/x/pulls")
 

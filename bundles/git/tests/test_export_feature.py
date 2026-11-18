@@ -58,6 +58,11 @@ class Export(GitCase):
     def test_unknown_ref(self):
         self.assertExit(self.tn("git", "export", "nope", cwd=self.r), 2)
 
+    def test_ref_is_never_an_option(self):
+        r = self.tn("git", "export", "--json", "-o", "x.zip", "--", "--remote=x", cwd=self.r)
+        self.assertExit(r, 2)
+        self.assertIn("starts with '-'", r.error["message"])
+
     def test_overwrite_confirms(self):
         self.ok(self.tn("git", "export", cwd=self.r))
         r = self.tn("git", "export", "--json", cwd=self.r)
@@ -107,6 +112,7 @@ class Feature(GitCase):
         self.assertEqual(res.json, {"branch": "feature/x", "base": "release"})
         self.assertExit(self.tn("git", "feature", "new", "x", cwd=self.r), 1)
         self.assertExit(self.tn("git", "feature", "new", "y", "--from", "nope", cwd=self.r), 2)
+        self.assertExit(self.tn("git", "feature", "new", "y", "--from=--orphan", cwd=self.r), 2)
         self.assertExit(self.tn("git", "feature", "new", "bad..name", cwd=self.r), 2)
         self.assertExit(self.tn("git", "feature", cwd=self.r), 2)
 

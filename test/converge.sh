@@ -11,8 +11,9 @@
 # `status`, which must be in sync. Exit status 0 only when all of these hold.
 #
 # Environment: DOT (the dot binary), SANDBOX (default ${TMPDIR:-/tmp}/dot-converge-<preset>),
-# PORT (fixture server port, default 18765), LOCAL_ENV (extra lines for the sandbox's
-# ~/.config/dot/local.env; example values only).
+# PORT (fixture server port, default 0: a free one, so runs of several presets at once never
+# share a server), LOCAL_ENV (extra lines for the sandbox's ~/.config/dot/local.env; example
+# values only).
 set -eu
 
 here=$(cd "$(dirname "$0")" && pwd)
@@ -22,8 +23,11 @@ preset=$1; shift
 case "$preset" in mac|mac-intel|desk|srv) ;; *) echo "preset must be mac, mac-intel, desk or srv" >&2; exit 2 ;; esac
 
 SANDBOX=${SANDBOX:-${TMPDIR:-/tmp}/dot-converge-$preset}
-PORT=${PORT:-18765}
+PORT=${PORT:-0}
 export SANDBOX
+# It is wiped first: never a relative path, /, $HOME or a directory above it.
+case "$SANDBOX" in /?*) ;; *) echo "SANDBOX must be an absolute path below /" >&2; exit 2 ;; esac
+case "${HOME:-}/" in "${SANDBOX%/}"/*) echo "SANDBOX must not be \$HOME or above it" >&2; exit 2 ;; esac
 rm -rf "$SANDBOX"
 mkdir -p "$SANDBOX/home/.config/dot" "$SANDBOX/state"
 [ -z "${LOCAL_ENV:-}" ] || printf '%s\n' "$LOCAL_ENV" > "$SANDBOX/home/.config/dot/local.env"
@@ -38,14 +42,19 @@ awk '
   list { print line; list = 0; url = "" }
 ' "$repo"/bundles/*/bundle.yml > "$SANDBOX/state/keys"
 
-python3 "$here/fixtures.py" "$PORT" &
+# The server writes its port once it listens: waiting for that, not for an answer on $PORT,
+# never mistakes another run's server (or anything else on that port) for this one.
+python3 "$here/fixtures.py" "$PORT" "$SANDBOX/state/port" &
 server=$!
 trap 'kill $server 2>/dev/null || true' EXIT INT TERM
 i=0
-until curl -fsS "http://127.0.0.1:$PORT/go/VERSION" >/dev/null 2>&1; do
-  i=$((i + 1)); [ $i -lt 50 ] || { echo "fixture server did not start" >&2; exit 1; }
+until [ -s "$SANDBOX/state/port" ]; do
+  kill -0 "$server" 2>/dev/null || { echo "fixture server exited (port $PORT in use?)" >&2; exit 1; }
+  i=$((i + 1)); [ $i -lt 100 ] || { echo "fixture server did not start" >&2; exit 1; }
   sleep 0.1
 done
+PORT=$(cat "$SANDBOX/state/port")
+curl -fsS "http://127.0.0.1:$PORT/go/VERSION" >/dev/null || { echo "fixture server does not answer" >&2; exit 1; }
 
 DOT_GITHUB_API="http://127.0.0.1:$PORT/gh"
 DOT_GITLAB_API="http://127.0.0.1:$PORT/gl"

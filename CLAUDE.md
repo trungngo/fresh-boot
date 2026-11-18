@@ -143,6 +143,8 @@ dirties the working tree and duplicates what zshrc already does. The contract:
   `conf.d/*.zsh` in name order after `compinit`, its aliases and the starship prompt (a file that must run early/late may be named `00-<name>.zsh` / `99-<name>.zsh`), then
   `~/.local.zshrc` last (machine-local, untracked, created empty by the zsh bundle). Guard every
   line (`command -v x >/dev/null && ...`, `[[ -d ~/.foo ]]`): the file may exist before the tool.
+  Code a tool generates (completion, init) goes through zshrc's cache, not a process per shell
+  start: `zshrc_cached gh completion -s zsh && source "$REPLY"` (bundles/zsh/README.md).
 - `block:` is for files dot does not own (`~/.bashrc`, `~/.profile`, `/etc/...`), **never
   `~/.zshrc`**.
 

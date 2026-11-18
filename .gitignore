@@ -25,3 +25,4 @@ id_ed25519*
 # Python bytecode: each file embeds the absolute source path (a home directory and user name)
 __pycache__/
 *.py[cod]
+*.bak

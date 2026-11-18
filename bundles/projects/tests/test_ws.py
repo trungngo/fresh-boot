@@ -295,6 +295,12 @@ class WsLsRm(ProjectsCase):
         self.assertIn("would: remove", r.stderr)
         self.assertTrue(self.p.ws("src-01").exists())
 
+    def test_dry_run_needs_no_yes_and_does_not_cd(self):
+        r = self.ok(self.tn("ws", "rm", "01", "-n", cwd=self.copy))
+        self.assertIsNone(r.cd)
+        self.assertNotIn("Removed", r.stderr)
+        self.assertTrue(self.p.ws("src-01").exists())
+
     def test_rm_outside_cwd_does_not_cd(self):
         r = self.ok(self.tn("ws", "rm", "01", "--yes", cwd=self.p.dir))
         self.assertIsNone(r.cd)

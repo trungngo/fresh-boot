@@ -11,6 +11,9 @@
 #   FRESH_BOOT_REF=<branch or tag>   script revision to download when piped (default main)
 set -eu
 
+# Everything is inside main, called on the last line: piped from curl, a download cut short
+# defines half a function and runs nothing, instead of running the half it got.
+main() {
 raw="https://raw.githubusercontent.com/trungngo/fresh-boot/${FRESH_BOOT_REF:-main}/install"
 
 case "$(uname -s)" in
@@ -39,10 +42,15 @@ case "$(uname -s)" in
   *) echo "fresh-boot: unsupported platform $(uname -s); on Windows run install/windows.ps1" >&2; exit 1 ;;
 esac
 
-here=$(cd "$(dirname "$0")" 2>/dev/null && pwd || true)
-if [ -n "$here" ] && [ -f "$here/$script" ]; then
-  exec bash "$here/$script" "$@"
-fi
+# Run from a checkout: the sibling script. Piped (`| sh`), $0 is the shell's name and dirname
+# is the current directory, whose own mac.sh (or whatever is lying there) must never run.
+case "$0" in
+  */install.sh|install.sh)
+    here=$(cd "$(dirname "$0")" 2>/dev/null && pwd || true)
+    if [ -n "$here" ] && [ -f "$here/$script" ]; then
+      exec bash "$here/$script" "$@"
+    fi ;;
+esac
 command -v curl >/dev/null 2>&1 || { echo "fresh-boot: curl is required (sudo apt-get install -y curl)" >&2; exit 1; }
 tmp=$(mktemp)
 trap 'rm -f "$tmp"' EXIT
@@ -53,3 +61,6 @@ if [ ! -t 0 ] && (: </dev/tty) 2>/dev/null; then
 else
   bash "$tmp" "$@"
 fi
+}
+
+main "$@"

@@ -10,7 +10,8 @@
             self.assertExit(r, 0)
 
 Everything runs in a temporary directory: HOME, the config, state and cache directories, and a
-PATH holding only the fakes plus git and the running Python. Nothing touches the real $HOME.
+PATH holding only the fakes plus git and the running Python. The environment is rebuilt from
+scratch (``_KEEP``), so nothing from the runner's shell leaks in. Nothing touches the real $HOME.
 """
 
 from __future__ import annotations
@@ -38,11 +39,23 @@ REPO_BUNDLES = LIB_DIR.parent.parent                       # bundles/ when run f
 TEST_NAME = "Test User"
 TEST_EMAIL = "test@example.com"
 
-_UNSET = ("TN_CD_FILE", "TN_SHELL", "TN_DEBUG", "TN_PICKER", "TMUX", "TMUX_PANE",
-          "SSH_CONNECTION", "SSH_CLIENT", "SSH_TTY", "DISPLAY", "WAYLAND_DISPLAY", "GH_TOKEN",
-          "GITHUB_TOKEN", "GITLAB_TOKEN", "VISUAL", "EDITOR", "DOT", "DOT_REPO", "PWD",
-          "GIT_DIR", "GIT_WORK_TREE", "PYTHONSTARTUP",
-          "TERM")
+# The only variables of the runner's environment a test sees (everything else, from the shell
+# the suite was started in: TMUX, SSH_*, DISPLAY, CLAUDECODE / CLAUDE_CODE_*, tokens, EDITOR,
+# GIT_*, XDG_*, ..., is dropped, so a suite gives the same result in a desktop terminal, over ssh,
+# inside tmux or inside a Claude session). Locale and temp dir for the child processes; the
+# Python ones so a subprocess interpreter starts as this one did; the Windows ones because
+# processes (git, cmd shims) do not start without them.
+_KEEP = ("LANG", "LC_ALL", "LC_CTYPE", "TMPDIR", "TEMP", "TMP",
+         "PYTHONPATH", "PYTHONHOME", "PYTHONUTF8", "PYTHONIOENCODING")
+_KEEP_WINDOWS = ("SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "COMSPEC", "PATHEXT", "OS",
+                 "PROCESSOR_ARCHITECTURE", "NUMBER_OF_PROCESSORS", "PROGRAMDATA",
+                 "PROGRAMFILES", "PROGRAMFILES(X86)", "PROGRAMW6432", "COMMONPROGRAMFILES")
+
+
+def _base_env(outer) -> dict:
+    """The kept subset of ``outer`` (case-insensitive keys on Windows)."""
+    keep = {k.upper() for k in _KEEP + (_KEEP_WINDOWS if IS_WINDOWS else ())}
+    return {k: v for k, v in outer.items() if k.upper() in keep}
 
 
 @dataclass
@@ -158,12 +171,11 @@ class TnTestCase(unittest.TestCase):
         real_git = shutil.which("git")
         self.git_path = real_git
 
+        sysroot = os.environ.get("SystemRoot")
+        base = _base_env(os.environ)
         env = os.environ
-        for k in _UNSET:
-            env.pop(k, None)
-        for k in list(env):
-            if k.startswith("GIT_") or k.startswith("XDG_"):
-                env.pop(k, None)
+        env.clear()
+        env.update(base)
         h = self.home
         env.update({
             "HOME": str(h), "USERPROFILE": str(h),
@@ -175,9 +187,9 @@ class TnTestCase(unittest.TestCase):
             "MY_MACHINE": "T1", "MY_NAME": TEST_NAME, "MY_EMAIL": TEST_EMAIL, "NO_COLOR": "1",
             "TN_PICKER": "list", "GIT_CONFIG_NOSYSTEM": "1",
             "GIT_CONFIG_GLOBAL": str(h / ".gitconfig"), "PYTHONDONTWRITEBYTECODE": "1",
-            "LANG": env.get("LANG", "C.UTF-8") or "C.UTF-8",
+            "LANG": env.get("LANG") or "C.UTF-8",
         })
-        env["PATH"] = os.pathsep.join(self._system_path(real_git))
+        env["PATH"] = os.pathsep.join(self._system_path(real_git, sysroot))
         if runner_plugins:
             env["TN_PLUGIN_PATH"] = runner_plugins
         else:
@@ -202,7 +214,7 @@ class TnTestCase(unittest.TestCase):
         self.addCleanup(restore)
 
     # -- PATH --------------------------------------------------------------------------------
-    def _system_path(self, real_git: str | None) -> list:
+    def _system_path(self, real_git: str | None, sysroot: str | None = None) -> list:
         """The fakes' bin, then git and the running Python only. On Unix they are linked into
         a private directory, so nothing else from their directories (tmux, fzf, ...) leaks in."""
         dirs = [str(self.bin)]
@@ -213,7 +225,6 @@ class TnTestCase(unittest.TestCase):
                     d = os.path.dirname(p)
                     if d not in dirs:
                         dirs.append(d)
-            sysroot = os.environ.get("SystemRoot")
             if sysroot:
                 dirs.append(os.path.join(sysroot, "System32"))
             return dirs
